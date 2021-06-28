@@ -6,7 +6,7 @@ Reuse working client and add new features to server
 * websocket proxy
 * multiple users, no signup
 * store device certs based on predefined CN prefix - device registration
-* very simple web interface
+* very simple web interface - no npm deps, xterm used from unpkg.com
 * possibility to proxy web via URL only
 * Device-over-DTLS
 
@@ -26,4 +26,4 @@ Reuse working client and add new features to server
 
 ## Dependencies
 * openssl - tested with 1.1.1f
-
+* hasmap from libds https://github.com/dgraham/libds (part of repo)

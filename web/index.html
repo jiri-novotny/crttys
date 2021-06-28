@@ -1,0 +1,102 @@
+<!doctype html>
+  <html>
+    <head>
+      <title>Device proxy - Device list</title>
+      <style>
+        .device-container {
+          display: block;
+          overflow: hidden;
+          min-height: 28px;
+          padding-top: 4px;
+          padding-bottom: 0px;
+        }
+        .device-id {
+          display: inline-block;
+          padding-left: 20px;
+          min-width: 260px;
+          max-width: 280px;
+          overflow-wrap: break-word;
+        }
+        .device-name {
+          display: inline-block;
+          padding-left: 4px;
+          width: auto;
+        }
+        .device-info {
+          float: right;
+          max-width: 25%;
+          margin-right: 20px;
+        }
+        .device-btn {
+          display: inline-block;
+          min-width: 80px;
+          max-width: 20%;
+        }
+        .even-row {
+          background-color: gainsboro;
+        }
+      </style>
+    </head>
+    <body>
+      <h2>Device list</h2>
+      <div id="content">
+      </div>
+      <script>
+        var parent = document.getElementById("content");
+        if ("WebSocket" in window) {
+          var ws = new WebSocket(window.location.origin.replace('http', 'ws') + "/ws");
+          ws.onopen = () => {
+            ws.send("list");
+          };
+          ws.onmessage = m => {
+            var resp = JSON.parse(m.data);
+            if (typeof resp.devices != "undefined")
+            {
+              for (var i = 0, len = resp.devices.length, para, term, web, s1, s2, s3, s4, s5; i < len; i++)
+              {
+                para = document.createElement("span");
+                para.className = "device-container";
+                if (i & 1 == 1) para.className += " even-row";
+                s1 = document.createElement("span");
+                s1.className = "device-id";
+                s1.innerText = resp.devices[i][0];
+                s2 = document.createElement("span");
+                s2.className = "device-name";
+                s2.innerText = resp.devices[i][1];
+                s3 = document.createElement("span");
+                s3.className = "device-info";
+                s4 = document.createElement("span");
+                s4.className = "device-btn";
+                s5 = document.createElement("span");
+                s5.className = "device-btn";
+                term = document.createElement("a");
+                term.href = '/' + resp.devices[i][0];
+                term.innerText = "Terminal";
+                term.target = "_blank";
+                web = document.createElement("a");
+                web.href = '/' + resp.devices[i][0] + '/' + resp.devices[i][2];
+                web.innerText = "Web";
+                web.target = "_blank";
+                s4.appendChild(term);
+                s5.appendChild(web);
+                s3.appendChild(s4);
+                s3.appendChild(s5);
+                para.appendChild(s1);
+                para.appendChild(s2);
+                para.appendChild(s3);
+                parent.appendChild(para);
+              }
+            }
+          };
+          ws.onclose = () => {
+            console.log('Connection is closed');
+          };
+          ws.onerror = e => {
+            console.log(e);
+          };
+        } else {
+          console.log('WebSocket is NOT supported by your Browser!');
+        }
+      </script>
+    </body>
+  </html>
