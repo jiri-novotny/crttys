@@ -17,7 +17,7 @@ Reuse working client and add new features to server
 
 ## Known limitations
 * Web is using basic authorization which can be in collision with proxied web app
-* Web proxy can fail with verly large single-page websites (>400KB)
+* Web proxy can fail with very large single-page websites (>400KB)
 * File transfer is not implemented
 * Currently tested with ~10 devices
 
