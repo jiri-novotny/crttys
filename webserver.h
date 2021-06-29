@@ -26,6 +26,8 @@ int initWeb(char *basicauth, char *devicelistpath, char *terminalpath);
 void acceptWeb(int clientSock, SSL_CTX *sslCtx, struct hashmap *context);
 void disconnectWeb(WebContext_t *wc);
 void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **shared);
+void writeWebSock(WebContext_t *wc, const void* data, int len);
+void writeTargetSock(WebContext_t *wc, const void* data, int len);
 void createList(struct hashmap *context);
 void cleanupWeb(struct hashmap *context);
 

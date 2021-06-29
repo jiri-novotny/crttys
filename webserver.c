@@ -14,13 +14,19 @@
 #define HEADER            "HTTP/1.1 200 OK\r\nWWW-Authenticate: Basic realm=\"restricted\"\r\nContent-Length: "
 #define WS_ERR            "{\"code\":500}"
 
-char *devicelist = NULL;
-int devicelistlen;
-char *terminal = NULL;
-int terminallen;
-char auth[512];
-char devices[2048];
-char referer[128];
+typedef struct
+{
+  char *devicelist;
+  int devicelistlen;
+  char *terminal;
+  int terminallen;
+  char auth[512];
+  char devices[2048];
+  int deviceslen;
+  char referer[128];
+} ServerData_t;
+
+static ServerData_t sd;
 
 static void sendDeviceWebRequest(WebContext_t *wc, struct hashmap **shared, char *deviceid, uint16_t port, char *method, char *proto, char *path, char *buffer, int len)
 {
@@ -54,22 +60,17 @@ static void sendDeviceWebRequest(WebContext_t *wc, struct hashmap **shared, char
       len += 3;
 #if ENABLE_SSL
       wc->target = dc->ssl;
-      SSL_write(wc->target, response, len);
 #else
       wc->target = dc->sock;
-      write(wc->target, response, len);
 #endif
+      writeTargetSock(wc, response, len);
       free(response);
     }
     // timer when device response fail? or fix rtty conn refused
   }
   else
   {
-#if ENABLE_WEB_SSL
-    SSL_write(wc->ssl, NOT_FOUND, strlen(NOT_FOUND));
-#else
-    write(wc->sock, NOT_FOUND, strlen(NOT_FOUND));
-#endif
+    writeWebSock(wc, NOT_FOUND, strlen(NOT_FOUND));
   }
 }
 
@@ -93,11 +94,7 @@ static void parseWebReqUrl(WebContext_t *wc, struct hashmap **shared, char *buff
   if (i == 1 && port == 0)
   {
     printf("WEB: terminal\n");
-#if ENABLE_WEB_SSL
-    SSL_write(wc->ssl, terminal, terminallen);
-#else
-    write(wc->sock, terminal, terminallen);
-#endif
+    writeWebSock(wc, sd.terminal, sd.terminallen);
   }
   else if (port != 0)
   {
@@ -106,11 +103,7 @@ static void parseWebReqUrl(WebContext_t *wc, struct hashmap **shared, char *buff
   }
   else
   {
-#if ENABLE_WEB_SSL
-    SSL_write(wc->ssl, NOT_FOUND, strlen(NOT_FOUND));
-#else
-    write(wc->sock, NOT_FOUND, strlen(NOT_FOUND));
-#endif
+    writeWebSock(wc, NOT_FOUND, strlen(NOT_FOUND));
   }
 }
 
@@ -124,11 +117,11 @@ static void parseWebReqReferer(WebContext_t *wc, struct hashmap **shared, char *
   char proto[24];
   char path[256] = {0};
 
-  i = strlen(referer);
+  i = strlen(sd.referer);
   i -= 2;
-  referer[i] = 0;
-  tmp = strstr((char *) buffer, referer);
-  referer[i] = '\r';
+  sd.referer[i] = 0;
+  tmp = strstr((char *) buffer, sd.referer);
+  sd.referer[i] = '\r';
   if (tmp)
   {
     sscanf(buffer, "%s %s %s", method, path, proto);
@@ -142,20 +135,12 @@ static void parseWebReqReferer(WebContext_t *wc, struct hashmap **shared, char *
     else if (i == 1 && port == 0)
     {
       printf("WEB: terminal\n");
-#if ENABLE_WEB_SSL
-      SSL_write(wc->ssl, terminal, terminallen);
-#else
-      write(wc->sock, terminal, terminallen);
-#endif
+      writeWebSock(wc, sd.terminal, sd.terminallen);
     }
     else
     {
       printf("WEB: proxy native, device not detected\n%s", buffer);
-#if ENABLE_WEB_SSL
-      SSL_write(wc->ssl, NOT_FOUND, strlen(NOT_FOUND));
-#else
-      write(wc->sock, NOT_FOUND, strlen(NOT_FOUND));
-#endif
+      writeWebSock(wc, NOT_FOUND, strlen(NOT_FOUND));
     }
   }
   else
@@ -202,21 +187,23 @@ int initWeb(char *basicauth, char *devicelistpath, char *terminalpath)
   size_t len;
   int ret = 0;
 
-  referer[0] = 0;
-  sprintf(devices, "{\"devices\":[]}");
-  sprintf(auth, "Authorization: Basic %s", basicauth);
+  sd.referer[0] = 0;
+  /* TODO: dynamic realloc based on device count */
+  sprintf(sd.devices, "{\"devices\":[]}");
+  /* TODO: user hashmap */
+  sprintf(sd.auth, "Authorization: Basic %s", basicauth);
   fd = fopen(devicelistpath, "r");
   if (fd)
   {
     fseek(fd, 0, SEEK_END);
     len = ftell(fd);
     rewind(fd);
-    devicelist = (char *) malloc(len + 96);
-    if (devicelist)
+    sd.devicelist = (char *) malloc(len + 96);
+    if (sd.devicelist)
     {
-      ret = sprintf(devicelist, "%s%lu\r\n\r\n", HEADER, len);
-      fread(devicelist + ret, 1, len, fd);
-      devicelistlen = strlen(devicelist);
+      ret = sprintf(sd.devicelist, "%s%lu\r\n\r\n", HEADER, len);
+      fread(sd.devicelist + ret, 1, len, fd);
+      sd.devicelistlen = ret + len;
       fclose(fd);
 
       fd = fopen(terminalpath, "r");
@@ -225,12 +212,12 @@ int initWeb(char *basicauth, char *devicelistpath, char *terminalpath)
         fseek(fd, 0, SEEK_END);
         len = ftell(fd);
         rewind(fd);
-        terminal = (char *) malloc(len + 96);
-        if (terminal)
+        sd.terminal = (char *) malloc(len + 96);
+        if (sd.terminal)
         {
-          ret = sprintf(terminal, "%s%lu\r\n\r\n", HEADER, len);
-          fread(terminal + ret, 1, len, fd);
-          terminallen = strlen(terminal);
+          ret = sprintf(sd.terminal, "%s%lu\r\n\r\n", HEADER, len);
+          fread(sd.terminal + ret, 1, len, fd);
+          sd.terminallen = ret + len;
           ret = 1;
         }
         fclose(fd);
@@ -288,7 +275,7 @@ void disconnectWeb(WebContext_t *wc)
   free(wc);
 }
 
-void removeDisconnectWeb(WebContext_t *wc, struct hashmap *context)
+static void removeDisconnectWeb(WebContext_t *wc, struct hashmap *context)
 {
   struct hkey hashkey;
 
@@ -296,6 +283,24 @@ void removeDisconnectWeb(WebContext_t *wc, struct hashmap *context)
   hashkey.length = sizeof(int);
   hashmap_remove(context, &hashkey);
   disconnectWeb(wc);
+}
+
+inline void writeWebSock(WebContext_t *wc, const void* data, int len)
+{
+#if ENABLE_WEB_SSL
+    SSL_write(wc->ssl, data, len);
+#else
+    write(wc->sock, data, len);
+#endif
+}
+
+inline void writeTargetSock(WebContext_t *wc, const void* data, int len)
+{
+#if ENABLE_SSL
+    SSL_write(wc->target, data, len);
+#else
+    write(wc->target, data, len);
+#endif
 }
 
 unsigned int wsBuildBuffer(char *response, unsigned int len, unsigned char *buffer)
@@ -365,11 +370,7 @@ void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **s
         buffer[1] = 0;
         buffer[2] = 1;
         buffer[3] = wc->session;
-#if ENABLE_SSL
-        SSL_write(wc->target, buffer, 4);
-#else
-        write(wc->target, buffer, 4);
-#endif
+        writeTargetSock(wc, buffer, 4);
       }
       removeDisconnectWeb(wc, context);
     }
@@ -381,7 +382,7 @@ void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **s
         {
           buffer[len] = 0;
 
-          if (referer[0] == 0)
+          if (sd.referer[0] == 0)
           {
             tmp = strstr((char *) buffer, "Referer: ");
             if (tmp)
@@ -390,19 +391,20 @@ void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **s
               j = tmpeol - tmp + 1;
               k = tmp[j];
               tmp[j] = 0;
-              sprintf(referer, "%s\r\n", tmp);
+              sprintf(sd.referer, "%s\r\n", tmp);
               tmp[j] = k;
             }
           }
 
           tmp = (char *) buffer;
-          if (strstr(tmp, auth) != NULL)
+          /* TODO: replace with multiuser auth hashmap */
+          if (strstr(tmp, sd.auth) != NULL)
           {
             if (strstr(tmp, "GET / ") != NULL)
             {
               printf("WEB: index\n");
-              tmp = devicelist;
-              len = strlen(devicelist);
+              tmp = sd.devicelist;
+              len = sd.devicelistlen;
             }
             else if (strstr(tmp, "GET /ws ") != NULL)
             {
@@ -413,14 +415,10 @@ void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **s
             }
             else if (strstr(tmp, "GET /favicon.ico ") != NULL)
             {
-#if ENABLE_WEB_SSL
-              SSL_write(wc->ssl, NOT_FOUND, strlen(NOT_FOUND));
-#else
-              write(wc->sock, NOT_FOUND, strlen(NOT_FOUND));
-#endif
+              writeWebSock(wc, NOT_FOUND, strlen(NOT_FOUND));
               len = 0;
             }
-            else if (strstr(tmp, referer) == NULL)
+            else if (strstr(tmp, sd.referer) == NULL)
             {
               parseWebReqReferer(wc, shared, (char *) buffer, len);
               len = 0;
@@ -433,11 +431,7 @@ void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **s
           }
           else
           {
-#if ENABLE_WEB_SSL
-            SSL_write(wc->ssl, UNAUTH, strlen(UNAUTH));
-#else
-            write(wc->sock, UNAUTH, strlen(UNAUTH));
-#endif
+            writeWebSock(wc, UNAUTH, strlen(UNAUTH));
             len = 0;
           }
         }
@@ -471,7 +465,11 @@ void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **s
             else if (wsLen == 127)
             {
               memcpy((void *) &wsLen, buffer + 2, 4);
-              if (wsLen > 0) printf("WEB: Unsupported length\n");
+              if (wsLen > 0)
+              {
+                printf("WEB: Unsupported length\n");
+                wsLen = 0;
+              }
               else
               {
                 memcpy((void *) &wsLen, buffer + 6, 4);
@@ -493,12 +491,8 @@ void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **s
             tmp = strstr((char *) buffer, "list");
             if (tmp)
             {
-              len = wsBuildBuffer(devices, strlen(devices), buffer);
-#if ENABLE_WEB_SSL
-              SSL_write(wc->ssl, buffer, len);
-#else
-              write(wc->sock, buffer, len);
-#endif
+              len = wsBuildBuffer(sd.devices, sd.deviceslen, buffer);
+              writeWebSock(wc, buffer, len);
               len = 0;
             }
             tmp = strstr((char *) buffer, "init:");
@@ -528,11 +522,10 @@ void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **s
                   len = 3;
 #if ENABLE_SSL
                   wc->target = dc->ssl;
-                  SSL_write(wc->target, buffer, len);
 #else
                   wc->target = dc->sock;
-                  write(wc->target, buffer, len);
 #endif
+                  writeTargetSock(wc, buffer, len);
                 }
                 else
                 {
@@ -553,11 +546,7 @@ void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **s
               tmp[2] = 0;
               tmp[3] = len;
               tmp[4] = wc->session;
-#if ENABLE_SSL
-              SSL_write(wc->target, tmp + 1, len + 3);
-#else
-              write(wc->target, tmp + 1, len + 3);
-#endif
+              writeTargetSock(wc, tmp + 1, len + 3);
               len = 0;
             }
             tmp = strstr((char *) buffer, "size:");
@@ -572,11 +561,7 @@ void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **s
               *(unsigned short *) &tmp[4] = htons((unsigned short) j);
               *(unsigned short *) &tmp[6] = htons((unsigned short) k);
               len += 3;
-#if ENABLE_SSL
-              SSL_write(wc->target, tmp, len);
-#else
-              write(wc->target, tmp, len);
-#endif
+              writeTargetSock(wc, tmp, len);
               len = 0;
             }
 
@@ -590,11 +575,7 @@ void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **s
         
         if (len > 0)
         {
-#if ENABLE_WEB_SSL
-          SSL_write(wc->ssl, tmp, len);
-#else
-          write(wc->sock, tmp, len);
-#endif
+          writeWebSock(wc, tmp, len);
         }
       }
       else if (errno == EAGAIN || errno == EWOULDBLOCK)
@@ -605,9 +586,8 @@ void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **s
       {
 #if ENABLE_WEB_SSL
         printf("WEB: ssl err %d\n", SSL_get_error(wc->ssl, ret));
-#else
-        perror("WEB: read()");
 #endif
+        perror("WEB: read()");
         removeDisconnectWeb(wc, context);
       }
     }
@@ -618,18 +598,18 @@ void createList(struct hashmap *context)
 {
   struct iterator *entries;
   DeviceContext_t *dc;
-  int len;
 
-  len = sprintf(devices, "{\"devices\":[");
+  sd.deviceslen = sprintf(sd.devices, "{\"devices\":[");
   entries = hashmap_iterator(context);
   while (entries->next(entries))
   {
     dc = ((struct hentry *) entries->current)->value;
-    len += sprintf(devices + len, "[\"%s\", \"%s\", \"%s\"],", dc->deviceid, dc->desc, dc->webdefault);
+    sd.deviceslen += sprintf(sd.devices + sd.deviceslen, "[\"%s\", \"%s\", \"%s\"],", dc->deviceid, dc->desc, dc->webdefault);
   }
-  len -= 1;
-  if (devices[len] == ',') devices[len] = 0;
-  strcat(devices, "]}");
+  sd.deviceslen -= 1;
+  if (sd.devices[sd.deviceslen] == ',') sd.devices[sd.deviceslen] = 0;
+  strcat(sd.devices, "]}");
+  sd.deviceslen += 2;
   entries->destroy(entries);
 }
 
@@ -647,6 +627,6 @@ void cleanupWeb(struct hashmap *context)
   entries->destroy(entries);
   hashmap_destroy(context);
 
-  if (devicelist) free(devicelist);
-  if (terminal) free(terminal);
+  if (sd.devicelist) free(sd.devicelist);
+  if (sd.terminal) free(sd.terminal);
 }
