@@ -43,12 +43,6 @@
                 location.reload();
                 break;
               case '\r': // Enter
-                if (line === "exit")
-                {
-                  setTimeout(() => {
-                    ws.close();
-                  }, 250);
-                }
               case '\t':
                 ws.send("data:" + line + e);
                 break;
@@ -100,11 +94,6 @@
           };
           ws.onmessage = m => {
             resp += m.data;
-            if (resp === "\r\nLogin timed out after 60 seconds.\r\n")
-            {
-              ws.close();
-            }
-
             if (line.length === 0)
             {
               if (init === 0)

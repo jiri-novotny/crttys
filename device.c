@@ -80,10 +80,21 @@ static void processMessage(DeviceContext_t *dc, struct hashmap **shared)
 
       case MSG_TYPE_LOGOUT:
 #if ENABLE_WEB_SSL
+        rlen = SSL_get_fd(dc->sessions[tmp[3] & 3]);
         dc->sessions[tmp[3] & 3] = NULL;
 #else
+        rlen = dc->sessions[tmp[3] & 3];
         dc->sessions[tmp[3] & 3] = -1;
 #endif
+        printf("DEV: session closed %d\n", rlen);
+        hashkey.data = &rlen;
+        hashkey.length = sizeof(int);
+        wc = (WebContext_t *) hashmap_get(shared[1], &hashkey);
+        if (wc)
+        {
+          hashmap_remove(shared[1], &hashkey);
+          disconnectWeb(wc);
+        }
         rlen = 0;
         break;
 
@@ -185,7 +196,6 @@ void acceptDevice(int clientSock, SSL_CTX *sslCtx, struct hashmap *context)
   if (dc)
   {
     dc->pending = -1;
-    memset(dc->sessions, -1, sizeof(dc->sessions));
     dc->sock = clientSock;
     if (sslCtx)
     {
