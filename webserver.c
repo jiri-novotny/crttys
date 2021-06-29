@@ -39,10 +39,9 @@ static void sendDeviceWebRequest(WebContext_t *wc, struct hashmap **shared, char
   dc = hashmap_get(shared[0], &hashkey);
   if (dc != NULL)
   {
-    response = (char *) malloc(len + 28);
+    response = (char *) calloc(1, len + 28);
     if (response)
     {
-      memset(response, 0, 40);
       len += 24; /* 18B ctx, 4B address, 2B port */
       response[0] = MSG_TYPE_WEB;
       *(uint16_t *) &response[1] = htons((uint16_t) len);
