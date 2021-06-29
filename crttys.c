@@ -358,6 +358,7 @@ int main(int argc, char **argv)
   cleanupWeb(websocks);
   close(deviceSock);
   close(wsSock);
+  hashmap_destroy(deviceids);
 #if ENABLE_SSL
   SSL_CTX_free(deviceSslCtx);
 #endif
