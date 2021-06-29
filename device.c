@@ -120,7 +120,6 @@ static void processMessage(DeviceContext_t *dc, struct hashmap **shared)
         break;
 
       case MSG_TYPE_HEARTBEAT:
-        printf("DEV: hb\n");
         dc->uptime = ntohl(*((uint32_t *) &tmp[3]));
         out[0] = MSG_TYPE_HEARTBEAT;
         out[1] = 0;
@@ -138,11 +137,7 @@ static void processMessage(DeviceContext_t *dc, struct hashmap **shared)
         if (wc)
         {
           printf("DEV: web %d %d\n", wc->sock, len);
-#if ENABLE_WEB_SSL
-          SSL_write(wc->ssl, tmp + 21, len - 18);
-#else
-          write(wc->sock, tmp + 21, len - 18);
-#endif
+          writeWebSock(wc, tmp + 21, len - 18);
         }
         else printf("DEV: not found %d\n", wc->sock);
         rlen = 0;
@@ -154,11 +149,7 @@ static void processMessage(DeviceContext_t *dc, struct hashmap **shared)
       }
       if (rlen > 0)
       {
-#if ENABLE_SSL
-        SSL_write(dc->ssl, out, rlen);
-#else
-        write(dc->sock, out, rlen);
-#endif
+        writeDevSock(dc, out, rlen);
       }
 
       len += 3; /* header */
@@ -243,6 +234,15 @@ void removeDisconnectDevice(DeviceContext_t *dc, struct hashmap *context, struct
   hashmap_remove(shared[0], &hashkey);
   createList(shared[0]);
   disconnectDevice(dc);
+}
+
+inline void writeDevSock(DeviceContext_t *dc, const void* data, int len)
+{
+#if ENABLE_SSL
+    SSL_write(dc->ssl, data, len);
+#else
+    write(dc->sock, data, len);
+#endif
 }
 
 void handleDeviceData(DeviceContext_t *dc, struct hashmap *context, struct hashmap **shared)
