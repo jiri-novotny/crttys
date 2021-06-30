@@ -62,6 +62,7 @@ static void sendDeviceWebRequest(WebContext_t *wc, struct hashmap **shared, char
 #else
       wc->target = dc->sock;
 #endif
+      wc->stat = 0;
       writeTargetSock(wc, response, len);
       free(response);
     }
@@ -593,23 +594,43 @@ void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **s
   } while (ret > 0);
 }
 
-void createList(struct hashmap *context)
+void createList(struct hashmap **shared)
 {
   struct iterator *entries;
   DeviceContext_t *dc;
+  WebContext_t *wc;
+  unsigned char *data;
+  int len;
 
   sd.deviceslen = sprintf(sd.devices, "{\"devices\":[");
-  entries = hashmap_iterator(context);
+  entries = hashmap_iterator(shared[0]);
   while (entries->next(entries))
   {
     dc = ((struct hentry *) entries->current)->value;
-    sd.deviceslen += sprintf(sd.devices + sd.deviceslen, "[\"%s\", \"%s\", \"%s\"],", dc->deviceid, dc->desc, dc->webdefault);
+    sd.deviceslen += sprintf(sd.devices + sd.deviceslen, "[\"%s\",\"%s\",\"%s\"],", dc->deviceid, dc->desc, dc->webdefault);
   }
   sd.deviceslen -= 1;
   if (sd.devices[sd.deviceslen] == ',') sd.devices[sd.deviceslen] = 0;
   strcat(sd.devices, "]}");
   sd.deviceslen += 2;
   entries->destroy(entries);
+
+  data = (unsigned char *) malloc(sd.deviceslen + 14);
+  if (data)
+  {
+    len = wsBuildBuffer(sd.devices, sd.deviceslen, data);
+    entries = hashmap_iterator(shared[1]);
+    while (entries->next(entries))
+    {
+      wc = ((struct hentry *) entries->current)->value;
+      if (wc->init)
+      {
+        writeWebSock(wc, data, len);
+      }
+    }
+    entries->destroy(entries);
+    free(data);
+  }
 }
 
 void cleanupWeb(struct hashmap *context)

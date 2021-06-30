@@ -49,7 +49,7 @@ static void processMessage(DeviceContext_t *dc, struct hashmap **shared)
           }
           else
           {
-            createList(shared[0]);
+            createList(shared);
           }
         }
         else
@@ -136,7 +136,8 @@ static void processMessage(DeviceContext_t *dc, struct hashmap **shared)
         wc = (WebContext_t *) hashmap_get(shared[1], &hashkey);
         if (wc)
         {
-          printf("DEV: web %d %d\n", wc->sock, len);
+          wc->stat += len - 18;
+          printf("DEV: web %d %d %d\n", wc->sock, len, wc->stat);
           writeWebSock(wc, tmp + 21, len - 18);
         }
         else printf("DEV: not found %d\n", wc->sock);
@@ -232,7 +233,7 @@ void removeDisconnectDevice(DeviceContext_t *dc, struct hashmap *context, struct
   hashkey.data = dc->deviceid;
   hashkey.length = dc->deviceidlen;
   hashmap_remove(shared[0], &hashkey);
-  createList(shared[0]);
+  createList(shared);
   disconnectDevice(dc);
 }
 
