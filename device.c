@@ -9,23 +9,56 @@
 
 extern unsigned int wsBuildBuffer(char *response, unsigned int len, unsigned char *buffer);
 
-static void processMessage(DeviceContext_t *dc, struct hashmap **shared)
+static void removeDisconnectDevice(DeviceContext_t *dc, struct hashmap *context)
 {
-  int ret;
+  struct hkey hashkey;
+
+  hashkey.data = &dc->sock;
+  hashkey.length = sizeof(int);
+  hashmap_remove(context, &hashkey);
+  disconnectDevice(dc);
+}
+
+static void clearDisconnectDevice(DeviceContext_t *dc, struct hashmap *context, struct hashmap **shared)
+{
+  struct hkey hashkey;
+
+  hashkey.data = dc->deviceid;
+  hashkey.length = dc->deviceidlen;
+  hashmap_remove(shared[0], &hashkey);
+
+#if 0
+  for (int i = 0; i < 5; i++)
+  {
+    if (dc->sessions[i] != NULL)
+    {
+      disconnectWeb(dc->sessions[i]);
+    }
+  }
+#endif
+
+  createList(shared);
+  removeDisconnectDevice(dc, context);
+}
+
+static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
+{
+  int ret = 0;
   struct hkey hashkey;
   unsigned char out[DEVICE_BUFFER_SIZE];
   unsigned char *tmp;
+  int ptr = 0;
   int len = 0;
   int rlen = 0;
   int session;
   WebContext_t *wc;
 
-  ret = dc->tlen - dc->plen;
-  while (ret > 3)
+  ptr = dc->tlen - dc->plen;
+  while (ptr > 3)
   {
     tmp = dc->in + dc->plen;
     len = ntohs(*((short unsigned int *) &tmp[1]));
-    if (len <= ret)
+    if (len <= ptr)
     {
       switch (tmp[0])
       {
@@ -54,9 +87,11 @@ static void processMessage(DeviceContext_t *dc, struct hashmap **shared)
         }
         else
         {
+          printf("DEV: id not unique\n");
           strcpy((char *) &out[3], "XError non-unique ID");
           out[2] = strlen((char *) &out[3]);
           rlen = out[2];
+          ret = 1;
         }
         break;
 
@@ -117,6 +152,8 @@ static void processMessage(DeviceContext_t *dc, struct hashmap **shared)
         break;
 
       case MSG_TYPE_CMD:
+        printf("DEV: CMD not supported\n");
+        rlen = 0;
         break;
 
       case MSG_TYPE_HEARTBEAT:
@@ -154,8 +191,8 @@ static void processMessage(DeviceContext_t *dc, struct hashmap **shared)
       }
 
       len += 3; /* header */
-      ret -= len;
-      if (ret == 0)
+      ptr -= len;
+      if (ptr == 0)
       {
         dc->tlen = 0;
         dc->plen = 0;
@@ -173,10 +210,12 @@ static void processMessage(DeviceContext_t *dc, struct hashmap **shared)
     }
     else
     {
-      ret = 0;
+      ptr = 0;
     }
   }
-  ret = 0;
+  ptr = 0;
+
+  return ret;
 }
 
 void acceptDevice(int clientSock, SSL_CTX *sslCtx, struct hashmap *context)
@@ -223,20 +262,6 @@ void disconnectDevice(DeviceContext_t *dc)
   free(dc);
 }
 
-void removeDisconnectDevice(DeviceContext_t *dc, struct hashmap *context, struct hashmap **shared)
-{
-  struct hkey hashkey;
-
-  hashkey.data = &dc->sock;
-  hashkey.length = sizeof(int);
-  hashmap_remove(context, &hashkey);
-  hashkey.data = dc->deviceid;
-  hashkey.length = dc->deviceidlen;
-  hashmap_remove(shared[0], &hashkey);
-  createList(shared);
-  disconnectDevice(dc);
-}
-
 inline void writeDevSock(DeviceContext_t *dc, const void* data, int len)
 {
 #if ENABLE_SSL
@@ -262,12 +287,15 @@ void handleDeviceData(DeviceContext_t *dc, struct hashmap *context, struct hashm
       dc->tlen += ret;
       if (dc->tlen >= DEVICE_BUFFER_READ)
       {
-        processMessage(dc, shared);
+        if (processMessage(dc, shared))
+        {
+          removeDisconnectDevice(dc, context);
+        }
       }
     }
     else if (ret == 0)
     {
-      removeDisconnectDevice(dc, context, shared);
+      clearDisconnectDevice(dc, context, shared);
     }
     else
     {
@@ -275,7 +303,10 @@ void handleDeviceData(DeviceContext_t *dc, struct hashmap *context, struct hashm
       {
         if (dc->tlen > 0)
         {
-          processMessage(dc, shared);
+          if (processMessage(dc, shared))
+          {
+            removeDisconnectDevice(dc, context);
+          }
         }
       }
       else
@@ -285,7 +316,7 @@ void handleDeviceData(DeviceContext_t *dc, struct hashmap *context, struct hashm
 #else
         perror("DEV: read()");
 #endif
-        removeDisconnectDevice(dc, context, shared);
+        clearDisconnectDevice(dc, context, shared);
       }
     }
   } while (ret > 0);
