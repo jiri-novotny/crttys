@@ -338,7 +338,7 @@ unsigned int wsBuildBuffer(char *response, unsigned int len, unsigned char *buff
 void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **shared)
 {
   int ret;
-  unsigned char buffer[WS_BUFFER_SIZE];
+  unsigned char buffer[WS_BUFFER_SIZE + 4096];
   char *tmp;
   char *tmpeol;
   int len = 0;
@@ -353,9 +353,9 @@ void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **s
   do
   {
 #if ENABLE_WEB_SSL
-    ret = SSL_read(wc->ssl, buffer + len, WS_BUFFER_SIZE);
+    ret = SSL_read(wc->ssl, buffer + len, 4096);
 #else
-    ret = read(wc->sock, buffer + len, WS_BUFFER_SIZE);
+    ret = read(wc->sock, buffer + len, 4096);
 #endif
     if (ret > 0)
     {
