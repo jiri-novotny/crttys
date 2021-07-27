@@ -7,6 +7,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -121,6 +122,8 @@ int main(int argc, char **argv)
   int i;
   int ret = 1;
   int sockReady;
+  int optval;
+  socklen_t optlen;
 
   unsigned short port = 4433;
   unsigned short wsport = 8080;
@@ -212,6 +215,36 @@ int main(int argc, char **argv)
 
   if ((deviceSock = openSocket(port)) == -1)
   {
+    return 1;
+  }
+
+  optval = 1;
+  optlen = sizeof(optval);
+  if (setsockopt(deviceSock, SOL_SOCKET, SO_KEEPALIVE, &optval, optlen) < 0)
+  {
+    perror("setsockopt(SO_KEEPALIVE)");
+    close(deviceSock);
+    return 1;
+  }
+  optval = 8;
+  if (setsockopt(deviceSock, SOL_TCP, TCP_KEEPIDLE, &optval, optlen) < 0)
+  {
+    perror("setsockopt(TCP_KEEPIDLE)");
+    close(deviceSock);
+    return 1;
+  }
+  optval = 3;
+  if (setsockopt(deviceSock, SOL_TCP, TCP_KEEPCNT, &optval, optlen) < 0)
+  {
+    perror("setsockopt(TCP_KEEPCNT)");
+    close(deviceSock);
+    return 1;
+  }
+  optval = 1;
+  if (setsockopt(deviceSock, SOL_TCP, TCP_KEEPINTVL, &optval, optlen) < 0)
+  {
+    perror("setsockopt(TCP_KEEPINTVL)");
+    close(deviceSock);
     return 1;
   }
 
