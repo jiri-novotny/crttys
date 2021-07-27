@@ -165,6 +165,39 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
         break;
 
       case MSG_TYPE_FILE:
+        for (int a = 0; a < (len + 3); a++)
+        {
+          printf("%02x", tmp[a]);
+        }
+        printf("\n");
+
+        switch (tmp[4])
+        {
+        case RTTY_FILE_MSG_INFO:
+          printf("DEV: RTTY_FILE_MSG_INFO\n");
+          out[0] = MSG_TYPE_FILE;
+          out[1] = 0;
+          out[2] = 1;
+          out[3] = RTTY_FILE_MSG_DATA_ACK;
+          rlen = 4;
+          break;
+        case RTTY_FILE_MSG_DATA:
+          printf("DEV: RTTY_FILE_MSG_DATA\n");
+          out[0] = MSG_TYPE_FILE;
+          out[1] = 0;
+          out[2] = 1;
+          out[3] = RTTY_FILE_MSG_DATA_ACK;
+          rlen = 4;
+          break;
+        case RTTY_FILE_MSG_PROGRESS:
+          printf("DEV: RTTY_FILE_MSG_PROGRESS\n");
+          rlen = 0;
+          break;
+        default:
+          printf("DEV: FILE not supported\n");
+          rlen = 0;
+          break;
+        }
         break;
 
       case MSG_TYPE_WEB:
