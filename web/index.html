@@ -35,17 +35,27 @@
         .even-row {
           background-color: gainsboro;
         }
+        #logo {
+          float: right;
+          margin-top: -50px;
+          margin-right: 20px;
+        }
       </style>
     </head>
     <body>
       <h2>Device list</h2>
+      <div id="logo">
+        <img id=connection src="https://www.clker.com/cliparts/F/j/3/t/Z/8/disconnect-th.png" alt="connection status" height="25px">
+      </div>
       <div id="content">
       </div>
       <script>
         var parent = document.getElementById("content");
+        var connection = document.getElementById("connection");
         if ("WebSocket" in window) {
           var ws = new WebSocket(window.location.origin.replace('http', 'ws') + "/ws");
           ws.onopen = () => {
+            connection.src = "https://www.clker.com/cliparts/f/e/5/d/11949945191404743672connect_established.svg.thumb.png";
             ws.send("list");
           };
           ws.onmessage = m => {
@@ -90,6 +100,7 @@
             }
           };
           ws.onclose = () => {
+            connection.src = "https://www.clker.com/cliparts/F/j/3/t/Z/8/disconnect-th.png";
             console.log('Connection is closed');
           };
           ws.onerror = e => {
