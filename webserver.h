@@ -22,6 +22,9 @@ typedef struct
   void *ssl;
 #endif
   int stat;
+  unsigned char * file;
+  int filesize;
+  int fileptr;
 } WebContext_t;
 
 int initWeb(char *basicauth, char *devicelistpath, char *terminalpath);

@@ -165,16 +165,25 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
         break;
 
       case MSG_TYPE_FILE:
-        for (int a = 0; a < (len + 3); a++)
-        {
-          printf("%02x", tmp[a]);
-        }
-        printf("\n");
+#if ENABLE_WEB_SSL
+        rlen = SSL_get_fd(dc->sessions[tmp[3] & 3]);
+#else
+        rlen = dc->sessions[tmp[3] & 3];
+#endif
+        hashkey.data = &rlen;
+        hashkey.length = sizeof(int);
+        wc = (WebContext_t *) hashmap_get(shared[1], &hashkey);
 
         switch (tmp[4])
         {
         case RTTY_FILE_MSG_INFO:
           printf("DEV: RTTY_FILE_MSG_INFO\n");
+          if (wc)
+          {
+            wc->fileptr = 0;
+            wc->filesize = 4096*4;
+            wc->file = (unsigned char *) malloc(wc->filesize);
+          }
           out[0] = MSG_TYPE_FILE;
           out[1] = 0;
           out[2] = 1;
@@ -183,6 +192,46 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
           break;
         case RTTY_FILE_MSG_DATA:
           printf("DEV: RTTY_FILE_MSG_DATA\n");
+          if (wc)
+          {
+            if (2 == len)
+            {
+              printf("DEV: file done\n");
+              // TODO: send to ws
+              if (wc->file)
+              {
+                free(wc->file);
+                wc->file = NULL;
+              }
+            }
+            else
+            {
+              if (wc->fileptr >= wc->filesize)
+              {
+                printf("DEV: file realloc needed\n");
+                wc->filesize *= 2;
+                tmp = realloc(wc->file, wc->filesize);
+                if (tmp)
+                {
+                  printf("DEV: file realloc ok\n");
+                  wc->file = tmp;
+                }
+                else
+                {
+                  printf("DEV: file realloc fail\n");
+                  free(wc->file);
+                  wc->file = NULL;
+                }
+              }
+              if (wc->file)
+              {
+                printf("DEV: file part stored\n");
+                tmp = dc->in + dc->plen + 5;
+                memcpy(wc->file + wc->fileptr, tmp, len - 2);
+                wc->fileptr += len - 2;
+              }
+            }
+          }
           out[0] = MSG_TYPE_FILE;
           out[1] = 0;
           out[2] = 1;
