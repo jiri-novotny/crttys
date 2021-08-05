@@ -9,6 +9,7 @@ typedef struct
 {
   int sock;
   int init;
+  int index;
   int session;
 #if ENABLE_SSL
   SSL *target;

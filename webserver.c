@@ -238,7 +238,6 @@ void acceptWeb(int clientSock, SSL_CTX *sslCtx, struct hashmap *context)
   if (wc)
   {
     wc->sock = clientSock;
-    wc->init = 0;
     wc->session = -1;
     if (sslCtx)
     {
@@ -491,6 +490,7 @@ void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **s
             tmp = strstr((char *) buffer, "list");
             if (tmp)
             {
+              wc->index = 1;
               len = wsBuildBuffer(sd.devices, sd.deviceslen, buffer);
               writeWebSock(wc, buffer, len);
               len = 0;
@@ -623,7 +623,7 @@ void createList(struct hashmap **shared)
     while (entries->next(entries))
     {
       wc = ((struct hentry *) entries->current)->value;
-      if (wc->init)
+      if (wc->index)
       {
         writeWebSock(wc, data, len);
       }
