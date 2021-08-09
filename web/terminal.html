@@ -1,8 +1,8 @@
 <!doctype html>
   <html>
     <head>
-      <link rel="stylesheet" href="https://unpkg.com/xterm@4.11.0/css/xterm.css" />
-      <script src="https://unpkg.com/xterm@4.11.0/lib/xterm.js"></script>
+      <link rel="stylesheet" href="https://unpkg.com/xterm@4.13.0/css/xterm.css" />
+      <script src="https://unpkg.com/xterm@4.13.0/lib/xterm.js"></script>
       <title>Device proxy - Terminal</title>
     </head>
     <body>
@@ -10,9 +10,12 @@
       <script>
         var term = new Terminal();
         var line = "";
+        var ptr = 0;
         var resp = "";
         var deviceid = "";
         var init = 0;
+        var dnl;
+
         term.open(document.getElementById('terminal'));
         term.onResize(e => {
           ws.send("size:" + e.cols + "x" + e.rows);
@@ -42,21 +45,24 @@
               case '\u001b[15~': // F5 override
                 location.reload();
                 break;
+              case '\t': // Tab
               case '\r': // Enter
-              case '\t':
                 ws.send("data:" + line + e);
+                ptr = 0;
                 break;
               case '\u007F': // Backspace (DEL)
                 // Do not delete the prompt
                 if (line.length > 0)
                 {
                   term.write('\b \b');
-                  line = line.slice(0, -1);
+                  line = line.slice(0, ptr - 1) + line.slice(ptr);
+                  ptr--;
                 }
                 break;
               default: // Print all other characters for demo
                 term.write(e);
                 line += e;
+                ptr++;
             }
           }
           else if (ws.readyState == WebSocket.CLOSED)
@@ -79,7 +85,6 @@
         });
 
         if ("WebSocket" in window) {
-          //var ws = new WebSocket(window.location.protocol.replace('http', 'ws') + "//" + document.location.host + "/ws");
           var ws = new WebSocket(window.location.origin.replace('http', 'ws') + "/ws");
           ws.onopen = () => {
             line = "";
@@ -93,23 +98,45 @@
             ws.send("init:"+deviceid);
           };
           ws.onmessage = m => {
-            resp += m.data;
-            if (line.length === 0)
+            if (init === 0)
             {
-              if (init === 0)
-              {
-                init = 1;
-                term.resize(Math.floor(document.documentElement.clientWidth / 9.4), Math.floor(document.documentElement.clientHeight / 19));
-              }
-              term.write(resp);
-              resp = "";
+              init = 1;
+              term.resize(Math.floor(document.documentElement.clientWidth / 9.4), Math.floor(document.documentElement.clientHeight / 19));
             }
-            else if (line.length <= resp.length)
+
+            if (m.data.startsWith("cns:"))
             {
-              resp = resp.slice(line.length);
-              term.write(resp);
-              resp = "";
-              line = "";
+              resp += m.data.substring(4);
+              if (line.length === 0)
+              {
+                term.write(resp);
+                resp = "";
+              }
+              else if (line.length <= resp.length)
+              {
+                resp = resp.slice(line.length);
+                term.write(resp);
+                resp = "";
+                line = "";
+              }
+            }
+            else if (m.data.startsWith("fli:"))
+            {
+              dnl = document.createElement('A');
+              dnl.download = m.data.substring(4);
+              dnl.href = 'data:application/octet-stream;base64,';
+            }
+            else if (m.data.startsWith("flp:"))
+            {
+              dnl.href += m.data.substring(4);
+            }
+            else if (m.data.startsWith("fld"))
+            {
+              dnl.click();
+            }
+            else
+            {
+              console.log(m.data);
             }
           };
           ws.onclose = () => { 

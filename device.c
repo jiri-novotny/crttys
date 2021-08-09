@@ -137,7 +137,8 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
         session = tmp[3] & 3;
         if (session >= 0)
         {
-          rlen = wsBuildBuffer((char *) &tmp[4], len - 1, out);
+          memcpy(tmp, "cns:", 4);
+          rlen = wsBuildBuffer((char *) tmp, len + 3, out);
 #if ENABLE_WEB_SSL
           SSL_write(dc->sessions[session], out, rlen);
 #else
@@ -183,6 +184,14 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
             wc->fileptr = 0;
             wc->filesize = 4096*4;
             wc->file = (unsigned char *) malloc(wc->filesize);
+
+            memcpy(tmp, "fli:", 4);
+            rlen = wsBuildBuffer((char *) tmp, len + 3, out);
+#if ENABLE_WEB_SSL
+            SSL_write(wc->ssl, out, rlen);
+#else
+            write(wc->sock, out, rlen);
+#endif
           }
           out[0] = MSG_TYPE_FILE;
           out[1] = 0;
@@ -197,15 +206,22 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
             if (2 == len)
             {
               printf("DEV: file done\n");
-              // TODO: send to ws
               if (wc->file)
               {
+                memcpy(tmp, "fld", 3);
+                rlen = wsBuildBuffer((char *) tmp, 3, out);
+#if ENABLE_WEB_SSL
+                SSL_write(wc->ssl, out, rlen);
+#else
+                write(wc->sock, out, rlen);
+#endif
                 free(wc->file);
                 wc->file = NULL;
               }
             }
             else
             {
+#if 0
               if (wc->fileptr >= wc->filesize)
               {
                 printf("DEV: file realloc needed\n");
@@ -230,6 +246,17 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
                 memcpy(wc->file + wc->fileptr, tmp, len - 2);
                 wc->fileptr += len - 2;
               }
+#else
+              memcpy(wc->file, "flp:", 4);
+              rlen = EVP_EncodeBlock(wc->file + 4, dc->in + dc->plen + 5, len - 2);
+              printf("DEV: file part %s\n", wc->file);
+              rlen = wsBuildBuffer((char *) wc->file, rlen + 4, out);
+#if ENABLE_WEB_SSL
+              SSL_write(wc->ssl, out, rlen);
+#else
+              write(wc->sock, out, rlen);
+#endif
+#endif
             }
           }
           out[0] = MSG_TYPE_FILE;
