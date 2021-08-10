@@ -22,17 +22,45 @@ static void removeDisconnectDevice(DeviceContext_t *dc, struct hashmap *context)
 static void clearDisconnectDevice(DeviceContext_t *dc, struct hashmap *context, struct hashmap **shared)
 {
   struct hkey hashkey;
+  int i;
+  int sesfd;
+  WebContext_t *wc;
 
   hashkey.data = dc->deviceid;
   hashkey.length = dc->deviceidlen;
   hashmap_remove(shared[0], &hashkey);
 
 #if 0
-  for (int i = 0; i < 5; i++)
+  for (i = 0; i < 5; i++)
   {
     if (dc->sessions[i] != NULL)
     {
       disconnectWeb(dc->sessions[i]);
+    }
+  }
+#else
+  hashkey.length = sizeof(int);
+  for (i = 0; i < 5; i++)
+  {
+#if ENABLE_WEB_SSL
+    if (dc->sessions[i] != NULL)
+    {
+      sesfd = SSL_get_fd(dc->sessions[i]);
+      dc->sessions[i] = NULL;
+#else
+    if (dc->sessions[i] != -1)
+    {
+      sesfd = dc->sessions[i];
+      dc->sessions[i] = -1;
+#endif
+      hashkey.data = &sesfd;
+      wc = (WebContext_t *) hashmap_get(shared[1], &hashkey);
+      if (wc)
+      {
+        printf("DEV: session closed %d\n", sesfd);
+        hashmap_remove(shared[1], &hashkey);
+        disconnectWeb(wc);
+      }
     }
   }
 #endif
