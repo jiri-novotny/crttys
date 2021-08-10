@@ -178,15 +178,14 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
         switch (tmp[4])
         {
         case RTTY_FILE_MSG_INFO:
-          printf("DEV: RTTY_FILE_MSG_INFO\n");
           if (wc)
           {
             wc->fileptr = 0;
-            wc->filesize = 4096*4;
+            wc->filesize = 4096 * 6; /* 16KB file + base64 */
             wc->file = (unsigned char *) malloc(wc->filesize);
 
-            memcpy(tmp, "fli:", 4);
-            rlen = wsBuildBuffer((char *) tmp, len + 3, out);
+            memcpy(tmp + 1, "fli:", 4);
+            rlen = wsBuildBuffer((char *) tmp + 1, len + 2, out);
 #if ENABLE_WEB_SSL
             SSL_write(wc->ssl, out, rlen);
 #else
@@ -200,16 +199,15 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
           rlen = 4;
           break;
         case RTTY_FILE_MSG_DATA:
-          printf("DEV: RTTY_FILE_MSG_DATA\n");
           if (wc)
           {
             if (2 == len)
             {
-              printf("DEV: file done\n");
               if (wc->file)
               {
-                memcpy(tmp, "fld", 3);
-                rlen = wsBuildBuffer((char *) tmp, 3, out);
+                memcpy(wc->file, "fld:", 4);
+                rlen = EVP_EncodeBlock(wc->file + 4, wc->filehold, wc->fileptr);
+                rlen = wsBuildBuffer((char *) wc->file, rlen + 4, out);
 #if ENABLE_WEB_SSL
                 SSL_write(wc->ssl, out, rlen);
 #else
@@ -248,8 +246,11 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
               }
 #else
               memcpy(wc->file, "flp:", 4);
-              rlen = EVP_EncodeBlock(wc->file + 4, dc->in + dc->plen + 5, len - 2);
-              printf("DEV: file part %s\n", wc->file);
+              memcpy(dc->in + dc->plen + 5 - wc->fileptr, wc->filehold, wc->fileptr);
+              out[0] = ((wc->fileptr + (len - 2)) % 3);
+              rlen = EVP_EncodeBlock(wc->file + 4, dc->in + dc->plen + 5 - wc->fileptr, len + wc->fileptr - out[0] - 2);
+              wc->fileptr = out[0];
+              memcpy(wc->filehold, dc->in + dc->plen + 5 + len - wc->fileptr - 2, wc->fileptr);
               rlen = wsBuildBuffer((char *) wc->file, rlen + 4, out);
 #if ENABLE_WEB_SSL
               SSL_write(wc->ssl, out, rlen);
@@ -270,7 +271,7 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
           rlen = 0;
           break;
         default:
-          printf("DEV: FILE not supported\n");
+          printf("DEV: FILE not supported %02x\n", tmp[4]);
           rlen = 0;
           break;
         }

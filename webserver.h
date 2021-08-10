@@ -25,6 +25,7 @@ typedef struct
   unsigned char * file;
   int filesize;
   int fileptr;
+  unsigned char filehold[3];
 } WebContext_t;
 
 int initWeb(char *basicauth, char *devicelistpath, char *terminalpath);

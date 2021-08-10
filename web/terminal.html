@@ -73,8 +73,9 @@
             {
               dnl.href += m.data.substring(4);
             }
-            else if (m.data.startsWith("fld"))
+            else if (m.data.startsWith("fld:"))
             {
+              dnl.href += m.data.substring(4);
               dnl.click();
             }
             else
