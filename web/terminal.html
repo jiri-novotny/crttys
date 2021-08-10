@@ -9,11 +9,8 @@
       <div id="terminal"></div>
       <script>
         var term = new Terminal();
-        var line = "";
-        var ptr = 0;
-        var resp = "";
-        var deviceid = "";
         var init = 0;
+        var deviceid = "";
         var dnl;
 
         term.open(document.getElementById('terminal'));
@@ -23,47 +20,7 @@
         term.onData(e => {
           if (ws.readyState === WebSocket.OPEN)
           {
-            switch (e) {
-              case '\u001b[A': // arrows
-              case '\u001b[B':
-              case '\u001b[C':
-              case '\u001b[D':
-              case '\u001b[H': // insert home ...
-              case '\u001b[F':
-              case '\u001b[2~':
-              case '\u001b[5~':
-              case '\u001b[6~':
-              case '\u001b[17~': // Fx
-              case '\u001b[18~':
-              case '\u001b[20~':
-              case '\u001b[21~':
-              case '\u001b[23~':
-              case '\u001b[24~':
-              case '\u0003': // Ctrl+C
-                ws.send('data:' + e);
-                break;
-              case '\u001b[15~': // F5 override
-                location.reload();
-                break;
-              case '\t': // Tab
-              case '\r': // Enter
-                ws.send("data:" + line + e);
-                ptr = 0;
-                break;
-              case '\u007F': // Backspace (DEL)
-                // Do not delete the prompt
-                if (line.length > 0)
-                {
-                  term.write('\b \b');
-                  line = line.slice(0, ptr - 1) + line.slice(ptr);
-                  ptr--;
-                }
-                break;
-              default: // Print all other characters for demo
-                term.write(e);
-                line += e;
-                ptr++;
-            }
+            ws.send("data:" + e);
           }
           else if (ws.readyState == WebSocket.CLOSED)
           {
@@ -87,8 +44,6 @@
         if ("WebSocket" in window) {
           var ws = new WebSocket(window.location.origin.replace('http', 'ws') + "/ws");
           ws.onopen = () => {
-            line = "";
-            resp = "";
             init = 0;
             deviceid = window.location.pathname;
             if (deviceid.slice(-1) === '/')
@@ -106,19 +61,7 @@
 
             if (m.data.startsWith("cns:"))
             {
-              resp += m.data.substring(4);
-              if (line.length === 0)
-              {
-                term.write(resp);
-                resp = "";
-              }
-              else if (line.length <= resp.length)
-              {
-                resp = resp.slice(line.length);
-                term.write(resp);
-                resp = "";
-                line = "";
-              }
+              term.write(m.data.substring(4));
             }
             else if (m.data.startsWith("fli:"))
             {
