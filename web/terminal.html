@@ -9,15 +9,17 @@
       <div id="terminal"></div>
       <script>
         var term = new Terminal();
-        var init = 0;
         var deviceid = "";
         var dnl;
+        var reader = new FileReader();
+        var upl = document.createElement('input');
 
         function resizeTerm() {
           term.resize(Math.floor(document.documentElement.clientWidth / 9.2),
                       Math.floor(document.documentElement.clientHeight / 18.3));
         }
 
+        upl.type = "file";
         window.addEventListener('resize', resizeTerm);
         term.open(document.getElementById('terminal'));
 
@@ -50,6 +52,19 @@
             {
               dnl.href += m.data.substring(4);
               dnl.click();
+            }
+            else if (m.data.startsWith("flo:"))
+            {
+              upl.click();
+              if (upl.files.length > 0)
+              {
+                console.log(upl.files[0].name + " " + upl.files[0].size);
+                reader.readAsDataURL(file)
+              }
+            }
+            else if (m.data.startsWith("flx:"))
+            {
+              
             }
             else
             {
@@ -89,6 +104,12 @@
               }
             }
           });
+
+          reader.loadend = function() { };
+          reader.onload = function(e) {
+            ws.send(e.target.result.split(",")[1]);
+            console.log(upl.files[0].name + " transferred");
+          };
         } else {
           term.write('\x1B[1;3;31mWebSocket is NOT supported by your Browser!\x1B[0m'); 
         }
