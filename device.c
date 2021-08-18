@@ -219,7 +219,7 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
           out[0] = MSG_TYPE_FILE;
           out[1] = 0;
           out[2] = 1;
-          out[3] = RTTY_FILE_MSG_DATA_ACK;
+          out[3] = RTTY_FILE_MSG_REQUEST_ACCEPT;
           rlen = 4;
           break;
         case RTTY_FILE_MSG_INFO:
@@ -313,6 +313,11 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
           break;
         case RTTY_FILE_MSG_CANCELED:
           printf("DEV: RTTY_FILE_MSG_CANCELED\n");
+          if (wc && wc->file)
+          {
+            free(wc->file);
+            wc->file = NULL;
+          }
           rlen = 0;
           break;
         case RTTY_FILE_MSG_PROGRESS:
