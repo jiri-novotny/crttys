@@ -205,6 +205,23 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
 
         switch (tmp[4])
         {
+        case RTTY_FILE_MSG_START_DOWNLOAD:
+          if (wc)
+          {
+            memcpy(tmp, "flo", 3);
+            rlen = wsBuildBuffer((char *) tmp, 3, out);
+#if ENABLE_WEB_SSL
+            SSL_write(wc->ssl, out, rlen);
+#else
+            write(wc->sock, out, rlen);
+#endif
+          }
+          out[0] = MSG_TYPE_FILE;
+          out[1] = 0;
+          out[2] = 1;
+          out[3] = RTTY_FILE_MSG_DATA_ACK;
+          rlen = 4;
+          break;
         case RTTY_FILE_MSG_INFO:
           if (wc)
           {
@@ -293,6 +310,10 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
           out[2] = 1;
           out[3] = RTTY_FILE_MSG_DATA_ACK;
           rlen = 4;
+          break;
+        case RTTY_FILE_MSG_CANCELED:
+          printf("DEV: RTTY_FILE_MSG_CANCELED\n");
+          rlen = 0;
           break;
         case RTTY_FILE_MSG_PROGRESS:
           printf("DEV: RTTY_FILE_MSG_PROGRESS\n");

@@ -60,7 +60,7 @@
               dnl.href += m.data.substring(4);
               dnl.click();
             }
-            else if (m.data.startsWith("flo:"))
+            else if (m.data.startsWith("flo"))
             {
               upl.click();
               if (upl.files.length > 0)
@@ -68,6 +68,7 @@
                 console.log(upl.files[0].name + " " + upl.files[0].size);
                 reader.readAsDataURL(file)
               }
+              else ws.send("flc");
             }
             else if (m.data.startsWith("flx:"))
             {
