@@ -9,6 +9,7 @@
       <div id="terminal"></div>
       <script>
         var term = new Terminal();
+        var init = false;
         var deviceid = "";
         var dnl;
         var reader = new FileReader();
@@ -31,11 +32,17 @@
               deviceid = deviceid.slice(1, -1);
             else
               deviceid = deviceid.slice(1);
+            init = false;
             ws.send("init:"+deviceid);
           };
           ws.onmessage = m => {
             if (m.data.startsWith("cns:"))
             {
+              if (!init)
+              {
+                init = true;
+                ws.send("size:" + term.cols + "x" + term.rows);
+              }
               term.write(m.data.substring(4));
             }
             else if (m.data.startsWith("fli:"))
@@ -79,7 +86,8 @@
           };
 
           term.onResize(e => {
-            ws.send("size:" + e.cols + "x" + e.rows);
+            if (ws.readyState === WebSocket.OPEN)
+              ws.send("size:" + e.cols + "x" + e.rows);
           });
           term.onData(e => {
             if (ws.readyState === WebSocket.OPEN)
