@@ -22,8 +22,12 @@ typedef struct
   void *ssl;
 #endif
   unsigned char * buffer;
-  int ptr;
-  int len;
+  unsigned int blen;
+
+  unsigned int ptr;
+  unsigned int plen;
+  unsigned int tlen;
+
   int stat;
   char filename[256];
   unsigned char * file;

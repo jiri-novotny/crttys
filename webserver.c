@@ -6,6 +6,7 @@
 
 #include "webserver.h"
 #include "device.h"
+#include "log.h"
 
 #define SWITCH_PROTO      "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: "
 #define NOT_FOUND         "HTTP/1.1 404 Not found\r\nConnection: close\r\nContent-type: text/html\r\nContent-Length: 93\r\n\r\n<html><head><title>Device proxy - Not found</title></head><body><h2>Device not connected</h2>"
@@ -89,15 +90,15 @@ static void parseWebReqUrl(WebContext_t *wc, struct hashmap **shared, char *buff
     *(unsigned short *) &path[0] = 0x002f;
   }
 
-  printf("WEB: %s %d %s (%d)\n", deviceid, port, path, i);
+  writeLog(LOG_DEBUG, "WEB: %s %d %s (%d)\n", deviceid, port, path, i);
   if (i == 1 && port == 0)
   {
-    printf("WEB: terminal\n");
+    writeLog(LOG_DEBUG, "WEB: terminal\n");
     writeWebSock(wc, sd.terminal, sd.terminallen);
   }
   else if (port != 0)
   {
-    printf("WEB: proxy\n");
+    writeLog(LOG_DEBUG, "WEB: proxy\n");
     sendDeviceWebRequest(wc, shared, deviceid, port, method, proto, path, (char *) buffer, len);
   }
   else
@@ -128,17 +129,17 @@ static void parseWebReqReferer(WebContext_t *wc, struct hashmap **shared, char *
     i = sscanf(tmp, "%[^/]/%hu", deviceid, &port);
     if (i == 2)
     {
-      printf("WEB: proxy native %s to %s %hu %s\n", method, deviceid, port, path);
+      writeLog(LOG_DEBUG, "WEB: proxy native %s to %s %hu %s\n", method, deviceid, port, path);
       sendDeviceWebRequest(wc, shared, deviceid, port, method, proto, path, (char *) buffer, len);
     }
     else if (i == 1 && port == 0)
     {
-      printf("WEB: terminal\n");
+      writeLog(LOG_DEBUG, "WEB: terminal\n");
       writeWebSock(wc, sd.terminal, sd.terminallen);
     }
     else
     {
-      printf("WEB: proxy native, device not detected\n%s", buffer);
+      writeLog(LOG_DEBUG, "WEB: proxy native, device not detected\n%s", buffer);
       writeWebSock(wc, NOT_FOUND, strlen(NOT_FOUND));
     }
   }
@@ -236,8 +237,8 @@ void acceptWeb(int clientSock, SSL_CTX *sslCtx, struct hashmap *context)
   wc = (WebContext_t *) calloc(1, sizeof(WebContext_t));
   if (wc)
   {
-    wc->len = 4096;
-    wc->buffer = (unsigned char *) malloc(wc->len);
+    wc->blen = 4096;
+    wc->buffer = (unsigned char *) malloc(wc->blen);
     if (wc->buffer)
     {
       wc->sock = clientSock;
@@ -278,7 +279,7 @@ void disconnectWeb(WebContext_t *wc)
     wc->ssl = NULL;
   }
 #endif
-  printf("WEB: fd %d closing\n", wc->sock);
+  writeLog(LOG_DEBUG, "WEB: fd %d closing\n", wc->sock);
   close(wc->sock);
   free(wc->buffer);
   free(wc);
@@ -344,6 +345,267 @@ unsigned int wsBuildBuffer(char *response, unsigned int len, unsigned char *buff
   return keyOffset;
 }
 
+int processWsMessage(WebContext_t *wc, struct hashmap *context, struct hashmap **shared)
+{
+  char *tmp;
+  uint32_t j;
+  uint32_t k;
+  struct hkey hashkey;
+  DeviceContext_t *dc;
+
+  tmp = strstr((char *) wc->buffer, "list");
+  if (tmp)
+  {
+    wc->index = 1;
+    wc->ptr = wsBuildBuffer(sd.devices, sd.deviceslen, wc->buffer);
+    writeWebSock(wc, wc->buffer, wc->ptr);
+    wc->ptr = 0;
+  }
+  tmp = strstr((char *) wc->buffer, "init:");
+  if (tmp)
+  {
+    hashkey.data = tmp + 5;
+    hashkey.length = strlen(tmp + 5);
+    dc = hashmap_get(shared[0], &hashkey);
+    if (dc != NULL)
+    {
+      if (dc->pending != -1)
+      {
+        hashkey.data = &dc->pending;
+        hashkey.length = sizeof(int);
+        if (hashmap_get(shared[1], &hashkey) == NULL)
+        {
+          dc->pending = -1;
+        }
+      }
+
+      if (dc->pending == -1)
+      {
+        dc->pending = wc->sock;
+        printf("WEB: sent login pending %d (%d)\n", dc->pending, dc->sock);
+        memset(wc->buffer, 0 , 4);
+        wc->buffer[0] = MSG_TYPE_LOGIN;
+        wc->ptr = 3;
+#if ENABLE_SSL
+        wc->target = dc->ssl;
+#else
+        wc->target = dc->sock;
+#endif
+        writeTargetSock(wc, wc->buffer, wc->ptr);
+      }
+      else
+      {
+        removeDisconnectWeb(wc, context);
+      }
+    }
+    else
+    {
+      removeDisconnectWeb(wc, context);
+    }
+    wc->ptr = 0;
+  }
+  tmp = strstr((char *) wc->buffer, "data:");
+  if (tmp && wc->session != -1)
+  {
+    wc->ptr = strlen(tmp + 5) + 1; /* includes session */
+    tmp[1] = MSG_TYPE_TERMDATA;
+    tmp[2] = 0;
+    tmp[3] = wc->ptr;
+    tmp[4] = wc->session;
+    writeTargetSock(wc, tmp + 1, wc->ptr + 3);
+    wc->ptr = 0;
+  }
+  tmp = strstr((char *) wc->buffer, "size:");
+  if (tmp && wc->session != -1)
+  {
+    sscanf(tmp + 5, "%hdx%hd", (unsigned short *) &j, (unsigned short *) &k);
+    wc->ptr = 5;
+    tmp[0] = MSG_TYPE_WINSIZE;
+    tmp[1] = 0;
+    tmp[2] = wc->ptr;
+    tmp[3] = wc->session;
+    *(unsigned short *) &tmp[4] = htons((unsigned short) j);
+    *(unsigned short *) &tmp[6] = htons((unsigned short) k);
+    wc->ptr += 3;
+    writeTargetSock(wc, tmp, wc->ptr);
+    wc->ptr = 0;
+  }
+  tmp = strstr((char *) wc->buffer, "flc");
+  if (tmp && wc->session != -1)
+  {
+    tmp[0] = MSG_TYPE_FILE;
+    tmp[1] = 0;
+    tmp[2] = 1;
+    tmp[3] = RTTY_FILE_MSG_CANCELED;
+    writeTargetSock(wc, tmp, 4);
+    wc->ptr = 0;
+  }
+  tmp = strstr((char *) wc->buffer, "fls:");
+  if (tmp && wc->session != -1)
+  {
+    printf("WEB: file start ack\n");
+    tmp[0] = MSG_TYPE_FILE;
+    tmp[1] = 0;
+    tmp[2] = 1;
+    tmp[3] = RTTY_FILE_MSG_CANCELED;
+    sscanf(tmp + 4, "%[^;];%d", wc->filename, (int *) &wc->filesize);
+    if (wc->filesize > 0)
+    {
+      wc->file = (unsigned char *) malloc(wc->filesize);
+      if (NULL == wc->file)
+      {
+        writeTargetSock(wc, tmp, 4);
+      }
+    } else
+      writeTargetSock(wc, tmp, 4);
+    wc->ptr = 0;
+  }
+  tmp = strstr((char *) wc->buffer, "flu:");
+  if (tmp && wc->session != -1)
+  {
+    printf("WEB: file upload\n");
+    EVP_DecodeBlock(wc->file, (unsigned char *) tmp + 4, wc->ptr - 4);
+    if (wc->file)
+    {
+      free(wc->file);
+      wc->file = NULL;
+      wc->filename[0] = 0;
+    }
+    tmp[0] = MSG_TYPE_FILE;
+    tmp[1] = 0;
+    tmp[2] = 1;
+    tmp[3] = RTTY_FILE_MSG_CANCELED;
+    writeTargetSock(wc, tmp, 4);
+    wc->ptr = 0;
+  }
+
+  return 0;
+}
+
+int processWsData(WebContext_t *wc, struct hashmap *context, struct hashmap **shared)
+{
+  uint32_t i;
+  unsigned char fin;
+  unsigned char opcode;
+  unsigned char masked;
+  uint32_t wsLen;
+  int rlen;
+  unsigned char mask[4];
+
+  writeLog(LOG_DEBUG, "WS:  packet ptr %d, plen %d\n", wc->ptr, wc->plen);
+  do {
+    /* backup processed length */
+    rlen = wc->plen;
+    fin = wc->buffer[wc->plen] & 0x80;
+    opcode = wc->buffer[wc->plen] & 0x0f;
+    wsLen = (wc->buffer[wc->plen + 1] & 0x7f);
+    masked = (wc->buffer[wc->plen + 1] & 0x80);
+    if (wsLen == 126)
+    {
+      memcpy((void *) &wsLen, wc->buffer + wc->plen + 2, 2);
+      wsLen = htons(wsLen);
+      wc->plen += 4;
+    }
+    else if (wsLen == 127)
+    {
+      memcpy((void *) &wsLen, wc->buffer + wc->plen + 2, 4);
+      if (wsLen > 0)
+      {
+        writeLog(LOG_DEBUG, "WS:  Unsupported length\n");
+        wsLen = 0;
+      }
+      else
+      {
+        memcpy((void *) &wsLen, wc->buffer + wc->plen + 6, 4);
+        wsLen = htonl(wsLen);
+      }
+      wc->plen += 10;
+    }
+
+    if (masked)
+    {
+      writeLog(LOG_DEBUG, "WS:  masked\n");
+      memcpy(mask, &wc->buffer[wc->plen], 4);
+      wc->plen += 4;
+    }
+
+    if ((wc->ptr - wc->plen) < wsLen)
+    {
+      writeLog(LOG_DEBUG, "WS:  packet incomplete\n\n");
+      break;
+    }
+    else
+    {
+      rlen = 0;
+    }
+
+    wc->tlen += wsLen;
+    if (fin)
+    {
+      writeLog(LOG_DEBUG, "WS:  fin detected %d\n", wc->tlen);
+    }
+    else
+      writeLog(LOG_DEBUG, "WS:  fragment\n");
+    switch (opcode)
+    {
+      case 0x00:
+      case 0x01:
+        /* parse ws data */
+        if (masked)
+        {
+          for (i = 0; i < wsLen; i++, wc->plen++)
+          {
+            wc->buffer[i] = (char)(wc->buffer[wc->plen] ^ mask[i & 0x3]);
+          }
+          wc->buffer[i] = 0;
+        }
+        //wc->plen += wsLen; // check for real data ptr
+        writeLog(LOG_DEBUG, "WS:  data packet ptr %d len %d plen %d\n", wc->ptr, wsLen, wc->plen);
+        break;
+      case 0x08:
+        writeLog(LOG_DEBUG, "WS:  close packet\n");
+        wc->plen += wsLen + 2;
+        wc->buffer[0] = 0x88;
+        wc->buffer[1] = 0x00;
+        rlen = 2;
+        break;
+      case 0x09:
+        writeLog(LOG_DEBUG, "WS:  ping packet\n");
+        wc->plen += wsLen + 2;
+        /* set pong */
+        wc->buffer[0] &= 0xF0;
+        wc->buffer[0] |= 0x0A;
+        rlen = 2;
+        break;
+      default:
+        writeLog(LOG_DEBUG, "WS:  unkown packet %d\n", wc->buffer[wc->plen] & 0x0f);
+        wc->plen = wc->ptr + 1;
+        break;
+    }
+    if (rlen)
+    {
+      writeWebSock(wc, wc->buffer, rlen);
+    }
+  } while (wc->plen < wc->ptr);
+
+  if (wc->plen < wc->ptr)
+  {
+    /* revert buffer start */
+    writeLog(LOG_DEBUG, "WS:  revert buffer start %d\n", wc->plen);
+    wc->plen = rlen;
+  }
+  else if (fin)
+  {
+    if (wc->tlen < 4096) writeLog(LOG_DEBUG, "\nWS:  %s\n\n", wc->buffer);
+//    processWsMessage(wc, context, shared);
+    writeLog(LOG_DEBUG, "WS:  reset buffer ptrs %d %d\n", wc->ptr, wc->plen);
+    wc->ptr = 0;
+    wc->plen = 0;
+    wc->tlen = 0;
+  }
+  return 0;
+}
+
 void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **shared)
 {
   int ret;
@@ -351,34 +613,30 @@ void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **s
   char *tmpeol;
   uint32_t j;
   uint32_t k;
-  uint32_t wsLen;
-  unsigned keyOffset;
-  unsigned char mask[4];
-  struct hkey hashkey;
-  DeviceContext_t *dc;
 
   do
   {
 #if ENABLE_WEB_SSL
-    ret = SSL_read(wc->ssl, wc->buffer + wc->ptr, wc->len - wc->ptr);
+    ret = SSL_read(wc->ssl, wc->buffer + wc->ptr, wc->blen - wc->ptr);
 #else
-    ret = read(wc->sock, wc->buffer + wc->ptr, wc->len - wc->ptr);
+    ret = read(wc->sock, wc->buffer + wc->ptr, wc->blen - wc->ptr);
 #endif
     if (ret > 0)
     {
+      writeLog(LOG_DEBUG, "WEB: part recv %d\n", ret);
       wc->ptr += ret;
-      if (wc->ptr > (wc->len / 2))
+      if (wc->ptr > (wc->blen / 2))
       {
-        tmp = realloc(wc->buffer, wc->len * 2);
+        tmp = realloc(wc->buffer, wc->blen * 2);
         if (tmp)
         {
-          printf("WEB: buffer realloc ok\n");
+          writeLog(LOG_DEBUG, "WEB: buffer realloc ok\n");
           wc->buffer = (unsigned char *) tmp;
-          wc->len *= 2;
+          wc->blen *= 2;
         }
         else
         {
-          printf("WEB: buffer realloc fail\n");
+          writeLog(LOG_DEBUG, "WEB: buffer realloc fail\n");
           removeDisconnectWeb(wc, context);
         }
       }
@@ -387,7 +645,7 @@ void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **s
     {
       if (wc->session != -1)
       {
-        printf("WEB: session logout\n");
+        writeLog(LOG_DEBUG, "WEB: session logout\n");
         wc->buffer[0] = MSG_TYPE_LOGOUT;
         wc->buffer[1] = 0;
         wc->buffer[2] = 1;
@@ -406,6 +664,7 @@ void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **s
 
           if (sd.referer[0] == 0)
           {
+            /* replace with custom header? eg. X-Device */
             tmp = strstr((char *) wc->buffer, "Referer: ");
             if (tmp)
             {
@@ -427,251 +686,54 @@ void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **s
           {
             if (strstr(tmp, "GET / ") != NULL)
             {
-              printf("WEB: index\n");
-              tmp = sd.devicelist;
-              wc->ptr = sd.devicelistlen;
+              writeLog(LOG_DEBUG, "WEB: index\n");
+              writeWebSock(wc, sd.devicelist, sd.devicelistlen);
             }
             else if (strstr(tmp, "GET /ws ") != NULL)
             {
-              printf("WEB: websocket\n");
-              wc->ptr = wsUpgrade((char *) wc->buffer);
-              if (wc->ptr)
+              writeLog(LOG_DEBUG, "WEB: websocket\n");
+              j = wsUpgrade((char *) wc->buffer);
+              if (j)
               {
                 wc->init = 1;
-                writeWebSock(wc, wc->buffer, wc->ptr);
-                wc->ptr = 0;
+                writeWebSock(wc, wc->buffer, j);
               }
             }
             else if (strstr(tmp, "GET /favicon.ico ") != NULL)
             {
               writeWebSock(wc, NOT_FOUND, strlen(NOT_FOUND));
-              wc->ptr = 0;
             }
             else if (strstr(tmp, sd.referer) == NULL)
             {
               parseWebReqReferer(wc, shared, (char *) wc->buffer, wc->ptr);
-              wc->ptr = 0;
             }
             else
             {
               parseWebReqUrl(wc, shared, (char *) wc->buffer, wc->ptr);
-              wc->ptr = 0;
             }
           }
           else
           {
             writeWebSock(wc, UNAUTH, strlen(UNAUTH));
-            wc->ptr = 0;
           }
+          wc->ptr = 0;
         }
         else
         {
-          if ((wc->buffer[0] & 0x0f) == 0x08)
-          {
-            wc->buffer[0] = 0x88;
-            wc->buffer[1] = 0x00;
-            wc->ptr = 2;
-          }
-          else if ((wc->buffer[0] & 0x0f) == 0x09)
-          {
-            /* set pong */
-            wc->buffer[0] &= 0xF0;
-            wc->buffer[0] |= 0x0A;
-            wc->ptr = 2;
-          }
-          else
-          {
-            /* parse ws data */
-            keyOffset = 2;
-            wsLen = (wc->buffer[1] & 0x7f);
-
-            if (wsLen == 126)
-            {
-              memcpy((void *) &wsLen, wc->buffer + 2, 2);
-              wsLen = htons(wsLen);
-              keyOffset = 4;
-            }
-            else if (wsLen == 127)
-            {
-              memcpy((void *) &wsLen, wc->buffer + 2, 4);
-              if (wsLen > 0)
-              {
-                printf("WEB: Unsupported length\n");
-                wsLen = 0;
-              }
-              else
-              {
-                memcpy((void *) &wsLen, wc->buffer + 6, 4);
-                wsLen = htonl(wsLen);
-                keyOffset = 10;
-              }
-            }
-
-            /* handle masking */
-            if (wc->buffer[1] & 0x80)
-            {
-              memcpy((void *) &mask, wc->buffer + keyOffset, 4);
-              for (j = 0, k = keyOffset + 4; j < wsLen; j++, k++)
-              {
-                wc->buffer[j] = (char)(wc->buffer[k] ^ mask[j & 0x3]);
-              }
-              wc->buffer[j] = 0;
-              keyOffset = 0;
-            }
-            wc->ptr = 0;
-
-            printf("WEB: %s\n", wc->buffer);
-            /* FIXME: websock data are here */
-            /* parse json */
-            tmp = strstr((char *) wc->buffer, "list");
-            if (tmp)
-            {
-              wc->index = 1;
-              wc->ptr = wsBuildBuffer(sd.devices, sd.deviceslen, wc->buffer);
-              writeWebSock(wc, wc->buffer, wc->ptr);
-              wc->ptr = 0;
-            }
-            tmp = strstr((char *) wc->buffer, "init:");
-            if (tmp)
-            {
-              hashkey.data = tmp + 5;
-              hashkey.length = strlen(tmp + 5);
-              dc = hashmap_get(shared[0], &hashkey);
-              if (dc != NULL)
-              {
-                if (dc->pending != -1)
-                {
-                  hashkey.data = &dc->pending;
-                  hashkey.length = sizeof(int);
-                  if (hashmap_get(shared[1], &hashkey) == NULL)
-                  {
-                    dc->pending = -1;
-                  }
-                }
-
-                if (dc->pending == -1)
-                {
-                  dc->pending = wc->sock;
-                  printf("WEB: sent login pending %d (%d)\n", dc->pending, dc->sock);
-                  memset(wc->buffer, 0 , 4);
-                  wc->buffer[0] = MSG_TYPE_LOGIN;
-                  wc->ptr = 3;
-#if ENABLE_SSL
-                  wc->target = dc->ssl;
-#else
-                  wc->target = dc->sock;
-#endif
-                  writeTargetSock(wc, wc->buffer, wc->ptr);
-                }
-                else
-                {
-                  removeDisconnectWeb(wc, context);
-                }
-              }
-              else
-              {
-                removeDisconnectWeb(wc, context);
-              }
-              wc->ptr = 0;
-            }
-            tmp = strstr((char *) wc->buffer, "data:");
-            if (tmp && wc->session != -1)
-            {
-              wc->ptr = strlen(tmp + 5) + 1; /* includes session */
-              tmp[1] = MSG_TYPE_TERMDATA;
-              tmp[2] = 0;
-              tmp[3] = wc->ptr;
-              tmp[4] = wc->session;
-              writeTargetSock(wc, tmp + 1, wc->ptr + 3);
-              wc->ptr = 0;
-            }
-            tmp = strstr((char *) wc->buffer, "size:");
-            if (tmp && wc->session != -1)
-            {
-              sscanf(tmp + 5, "%hdx%hd", (unsigned short *) &j, (unsigned short *) &k);
-              wc->ptr = 5;
-              tmp[0] = MSG_TYPE_WINSIZE;
-              tmp[1] = 0;
-              tmp[2] = wc->ptr;
-              tmp[3] = wc->session;
-              *(unsigned short *) &tmp[4] = htons((unsigned short) j);
-              *(unsigned short *) &tmp[6] = htons((unsigned short) k);
-              wc->ptr += 3;
-              writeTargetSock(wc, tmp, wc->ptr);
-              wc->ptr = 0;
-            }
-            tmp = strstr((char *) wc->buffer, "flc");
-            if (tmp && wc->session != -1)
-            {
-              tmp[0] = MSG_TYPE_FILE;
-              tmp[1] = 0;
-              tmp[2] = 1;
-              tmp[3] = RTTY_FILE_MSG_CANCELED;
-              writeTargetSock(wc, tmp, 4);
-              wc->ptr = 0;
-            }
-            tmp = strstr((char *) wc->buffer, "fls:");
-            if (tmp && wc->session != -1)
-            {
-              printf("WEB: file start ack\n");
-              tmp[0] = MSG_TYPE_FILE;
-              tmp[1] = 0;
-              tmp[2] = 1;
-              tmp[3] = RTTY_FILE_MSG_CANCELED;
-              sscanf(tmp + 4, "%[^;];%d", wc->filename, (int *) &wc->filesize);
-              if (wc->filesize > 0)
-              {
-                wc->file = (unsigned char *) malloc(wc->filesize);
-                if (NULL == wc->file)
-                {
-                  writeTargetSock(wc, tmp, 4);
-                }
-              } else
-                writeTargetSock(wc, tmp, 4);
-              wc->ptr = 0;
-            }
-            tmp = strstr((char *) wc->buffer, "flu:");
-            if (tmp && wc->session != -1)
-            {
-              printf("WEB: file upload\n");
-              EVP_DecodeBlock(wc->file, (unsigned char *) tmp + 4, wc->ptr - 4);
-              if (wc->file)
-              {
-                free(wc->file);
-                wc->file = NULL;
-                wc->filename[0] = 0;
-              }
-              tmp[0] = MSG_TYPE_FILE;
-              tmp[1] = 0;
-              tmp[2] = 1;
-              tmp[3] = RTTY_FILE_MSG_CANCELED;
-              writeTargetSock(wc, tmp, 4);
-              wc->ptr = 0;
-            }
-
-            if (wc->ptr > 0)
-            {
-              wc->ptr = wsBuildBuffer(WS_ERR, strlen(WS_ERR), wc->buffer);
-            }
-          }
-          tmp = (char *) wc->buffer;
-        }
-        
-        if (wc->ptr > 0)
-        {
-          writeWebSock(wc, tmp, wc->ptr);
+          processWsData(wc, context, shared);
         }
       }
       else if (errno == EAGAIN || errno == EWOULDBLOCK)
       {
-        printf("WEB: ssl handshake for %d OK\n", wc->sock);
+        writeLog(LOG_DEBUG, "WEB: ssl handshake for %d OK\n", wc->sock);
       }
       else
       {
 #if ENABLE_WEB_SSL
-        printf("WEB: ssl err %d\n", SSL_get_error(wc->ssl, ret));
-#endif
+        writeLog(LOG_DEBUG, "WEB: ssl err %d\n", SSL_get_error(wc->ssl, ret));
+#else
         perror("WEB: read()");
+#endif
         removeDisconnectWeb(wc, context);
       }
     }
