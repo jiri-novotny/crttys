@@ -500,15 +500,16 @@ int processWsData(WebContext_t *wc, struct hashmap *context, struct hashmap **sh
     opcode = wc->buffer[wc->plen] & 0x0f;
     wsLen = (wc->buffer[wc->plen + 1] & 0x7f);
     masked = (wc->buffer[wc->plen + 1] & 0x80);
+    wc->plen += 2;
     if (wsLen == 126)
     {
-      memcpy((void *) &wsLen, wc->buffer + wc->plen + 2, 2);
+      memcpy((void *) &wsLen, wc->buffer + wc->plen, 2);
       wsLen = htons(wsLen);
-      wc->plen += 4;
+      wc->plen += 2;
     }
     else if (wsLen == 127)
     {
-      memcpy((void *) &wsLen, wc->buffer + wc->plen + 2, 4);
+      memcpy((void *) &wsLen, wc->buffer + wc->plen, 4);
       if (wsLen > 0)
       {
         writeLog(LOG_DEBUG, "WS:  Unsupported length\n");
@@ -516,10 +517,10 @@ int processWsData(WebContext_t *wc, struct hashmap *context, struct hashmap **sh
       }
       else
       {
-        memcpy((void *) &wsLen, wc->buffer + wc->plen + 6, 4);
+        memcpy((void *) &wsLen, wc->buffer + wc->plen + 4, 4);
         wsLen = htonl(wsLen);
       }
-      wc->plen += 10;
+      wc->plen += 8;
     }
 
     if (masked)
@@ -559,8 +560,13 @@ int processWsData(WebContext_t *wc, struct hashmap *context, struct hashmap **sh
           }
           wc->buffer[i] = 0;
         }
-        //wc->plen += wsLen; // check for real data ptr
         writeLog(LOG_DEBUG, "WS:  data packet ptr %d len %d plen %d\n", wc->ptr, wsLen, wc->plen);
+        if (fin)
+        {
+          if (wc->tlen < 4096) writeLog(LOG_DEBUG, "\nWS:  %s\n\n", wc->buffer);
+          processWsMessage(wc, context, shared);
+          wc->tlen = 0;
+        }
         break;
       case 0x08:
         writeLog(LOG_DEBUG, "WS:  close packet\n");
@@ -596,12 +602,9 @@ int processWsData(WebContext_t *wc, struct hashmap *context, struct hashmap **sh
   }
   else if (fin)
   {
-    if (wc->tlen < 4096) writeLog(LOG_DEBUG, "\nWS:  %s\n\n", wc->buffer);
-//    processWsMessage(wc, context, shared);
     writeLog(LOG_DEBUG, "WS:  reset buffer ptrs %d %d\n", wc->ptr, wc->plen);
     wc->ptr = 0;
     wc->plen = 0;
-    wc->tlen = 0;
   }
   return 0;
 }
