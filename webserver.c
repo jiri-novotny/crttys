@@ -348,6 +348,7 @@ unsigned int wsBuildBuffer(char *response, unsigned int len, unsigned char *buff
 int processWsMessage(WebContext_t *wc, struct hashmap *context, struct hashmap **shared)
 {
   char *tmp;
+  char out[1024];
   uint32_t j;
   uint32_t k;
   struct hkey hashkey;
@@ -357,9 +358,10 @@ int processWsMessage(WebContext_t *wc, struct hashmap *context, struct hashmap *
   if (tmp)
   {
     wc->index = 1;
-    wc->ptr = wsBuildBuffer(sd.devices, sd.deviceslen, wc->buffer);
-    writeWebSock(wc, wc->buffer, wc->ptr);
-    wc->ptr = 0;
+    tmp = malloc(sd.deviceslen + 30);
+    k = wsBuildBuffer(sd.devices, sd.deviceslen, (unsigned char *) tmp);
+    writeWebSock(wc, tmp, k);
+    free(tmp);
   }
   tmp = strstr((char *) wc->buffer, "init:");
   if (tmp)
@@ -383,15 +385,14 @@ int processWsMessage(WebContext_t *wc, struct hashmap *context, struct hashmap *
       {
         dc->pending = wc->sock;
         printf("WEB: sent login pending %d (%d)\n", dc->pending, dc->sock);
-        memset(wc->buffer, 0 , 4);
-        wc->buffer[0] = MSG_TYPE_LOGIN;
-        wc->ptr = 3;
+        memset(out, 0 , 4);
+        out[0] = MSG_TYPE_LOGIN;
 #if ENABLE_SSL
         wc->target = dc->ssl;
 #else
         wc->target = dc->sock;
 #endif
-        writeTargetSock(wc, wc->buffer, wc->ptr);
+        writeTargetSock(wc, out, 3);
       }
       else
       {
@@ -402,63 +403,58 @@ int processWsMessage(WebContext_t *wc, struct hashmap *context, struct hashmap *
     {
       removeDisconnectWeb(wc, context);
     }
-    wc->ptr = 0;
   }
   tmp = strstr((char *) wc->buffer, "data:");
   if (tmp && wc->session != -1)
   {
-    wc->ptr = strlen(tmp + 5) + 1; /* includes session */
-    tmp[1] = MSG_TYPE_TERMDATA;
-    tmp[2] = 0;
-    tmp[3] = wc->ptr;
-    tmp[4] = wc->session;
-    writeTargetSock(wc, tmp + 1, wc->ptr + 3);
-    wc->ptr = 0;
+    k = strlen(tmp + 5);
+    out[0] = MSG_TYPE_TERMDATA;
+    out[1] = 0;
+    out[2] = k + 1; /* includes session */
+    out[3] = wc->session;
+    memcpy(out + 4, tmp + 5, k);
+    k += 4;
+    writeTargetSock(wc, out, k);
   }
   tmp = strstr((char *) wc->buffer, "size:");
   if (tmp && wc->session != -1)
   {
     sscanf(tmp + 5, "%hdx%hd", (unsigned short *) &j, (unsigned short *) &k);
-    wc->ptr = 5;
-    tmp[0] = MSG_TYPE_WINSIZE;
-    tmp[1] = 0;
-    tmp[2] = wc->ptr;
-    tmp[3] = wc->session;
-    *(unsigned short *) &tmp[4] = htons((unsigned short) j);
-    *(unsigned short *) &tmp[6] = htons((unsigned short) k);
-    wc->ptr += 3;
-    writeTargetSock(wc, tmp, wc->ptr);
-    wc->ptr = 0;
+    out[0] = MSG_TYPE_WINSIZE;
+    out[1] = 0;
+    out[2] = 5;
+    out[3] = wc->session;
+    *(unsigned short *) &out[4] = htons((unsigned short) j);
+    *(unsigned short *) &out[6] = htons((unsigned short) k);
+    writeTargetSock(wc, out, 8);
   }
   tmp = strstr((char *) wc->buffer, "flc");
   if (tmp && wc->session != -1)
   {
-    tmp[0] = MSG_TYPE_FILE;
-    tmp[1] = 0;
-    tmp[2] = 1;
-    tmp[3] = RTTY_FILE_MSG_CANCELED;
-    writeTargetSock(wc, tmp, 4);
-    wc->ptr = 0;
+    out[0] = MSG_TYPE_FILE;
+    out[1] = 0;
+    out[2] = 1;
+    out[3] = RTTY_FILE_MSG_CANCELED;
+    writeTargetSock(wc, out, 4);
   }
   tmp = strstr((char *) wc->buffer, "fls:");
   if (tmp && wc->session != -1)
   {
     printf("WEB: file start ack\n");
-    tmp[0] = MSG_TYPE_FILE;
-    tmp[1] = 0;
-    tmp[2] = 1;
-    tmp[3] = RTTY_FILE_MSG_CANCELED;
+    out[0] = MSG_TYPE_FILE;
+    out[1] = 0;
+    out[2] = 1;
+    out[3] = RTTY_FILE_MSG_CANCELED;
     sscanf(tmp + 4, "%[^;];%d", wc->filename, (int *) &wc->filesize);
     if (wc->filesize > 0)
     {
       wc->file = (unsigned char *) malloc(wc->filesize);
       if (NULL == wc->file)
       {
-        writeTargetSock(wc, tmp, 4);
+        writeTargetSock(wc, out, 4);
       }
     } else
-      writeTargetSock(wc, tmp, 4);
-    wc->ptr = 0;
+      writeTargetSock(wc, out, 4);
   }
   tmp = strstr((char *) wc->buffer, "flu:");
   if (tmp && wc->session != -1)
@@ -471,12 +467,11 @@ int processWsMessage(WebContext_t *wc, struct hashmap *context, struct hashmap *
       wc->file = NULL;
       wc->filename[0] = 0;
     }
-    tmp[0] = MSG_TYPE_FILE;
-    tmp[1] = 0;
-    tmp[2] = 1;
-    tmp[3] = RTTY_FILE_MSG_CANCELED;
-    writeTargetSock(wc, tmp, 4);
-    wc->ptr = 0;
+    out[0] = MSG_TYPE_FILE;
+    out[1] = 0;
+    out[2] = 1;
+    out[3] = RTTY_FILE_MSG_CANCELED;
+    writeTargetSock(wc, out, 4);
   }
 
   return 0;
@@ -626,7 +621,6 @@ void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **s
 #endif
     if (ret > 0)
     {
-      writeLog(LOG_DEBUG, "WEB: part recv %d\n", ret);
       wc->ptr += ret;
       if (wc->ptr > (wc->blen / 2))
       {
