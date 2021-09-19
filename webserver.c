@@ -752,8 +752,10 @@ void createList(struct hashmap **shared)
     dc = ((struct hentry *) entries->current)->value;
     sd.deviceslen += sprintf(sd.devices + sd.deviceslen, "[\"%s\",\"%s\",\"%s\"],", dc->deviceid, dc->desc, dc->webdefault);
   }
-  sd.deviceslen -= 1;
-  if (sd.devices[sd.deviceslen] == ',') sd.devices[sd.deviceslen] = 0;
+  if (sd.devices[sd.deviceslen - 1] == ',') {
+    sd.deviceslen -= 1;
+    sd.devices[sd.deviceslen] = 0;
+  }
   strcat(sd.devices, "]}");
   sd.deviceslen += 2;
   entries->destroy(entries);
