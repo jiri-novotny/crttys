@@ -9,7 +9,6 @@
       <div id="terminal"></div>
       <script>
         var term = new Terminal();
-        var init = false;
         var deviceid = "";
         var dnl;
         var reader = new FileReader();
@@ -40,21 +39,15 @@
           var ws = new WebSocket(window.location.origin.replace('http', 'ws') + "/ws");
           ws.onopen = () => {
             deviceid = window.location.pathname;
-            if (deviceid.slice(-1) === '/')
-              deviceid = deviceid.slice(1, -1);
-            else
-              deviceid = deviceid.slice(1);
-            init = false;
-            ws.send("init:"+deviceid);
+            if (deviceid.slice(-1) === '/') deviceid = deviceid.slice(1, -1);
+            else deviceid = deviceid.slice(1);
+            ws.send("init:" + deviceid);
+            ws.send("size:" + term.cols + "x" + term.rows);
+            term.focus();
           };
           ws.onmessage = m => {
             if (m.data.startsWith("cns:"))
             {
-              if (!init)
-              {
-                init = true;
-                ws.send("size:" + term.cols + "x" + term.rows);
-              }
               term.write(m.data.substring(4));
             }
             else if (m.data.startsWith("fli:"))
