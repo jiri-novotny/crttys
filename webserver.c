@@ -345,15 +345,16 @@ unsigned int wsBuildBuffer(char *response, unsigned int len, unsigned char *buff
 
 int processWsMessage(WebContext_t *wc, struct hashmap *context, struct hashmap **shared)
 {
+  char *find;
   char *tmp;
-  char out[1024];
+  char out[32];
   uint32_t j;
   uint32_t k;
   struct hkey hashkey;
   DeviceContext_t *dc;
 
-  tmp = strstr((char *) wc->buffer, "list");
-  if (tmp)
+  find = strstr((char *) wc->buffer, "list");
+  if (find)
   {
     wc->index = 1;
     tmp = malloc(sd.deviceslen + 30);
@@ -361,11 +362,11 @@ int processWsMessage(WebContext_t *wc, struct hashmap *context, struct hashmap *
     writeWebSock(wc, tmp, k);
     free(tmp);
   }
-  tmp = strstr((char *) wc->buffer, "init:");
-  if (tmp)
+  find = strstr((char *) wc->buffer, "init:");
+  if (find)
   {
-    hashkey.data = tmp + 5;
-    hashkey.length = strlen(tmp + 5);
+    hashkey.data = find + 5;
+    hashkey.length = strlen(find + 5);
     dc = hashmap_get(shared[0], &hashkey);
     if (dc != NULL)
     {
@@ -402,22 +403,33 @@ int processWsMessage(WebContext_t *wc, struct hashmap *context, struct hashmap *
       removeDisconnectWeb(wc, context);
     }
   }
-  tmp = strstr((char *) wc->buffer, "data:");
-  if (tmp && wc->session != -1)
+  find = strstr((char *) wc->buffer, "data:");
+  if (find && wc->session != -1)
   {
-    k = strlen(tmp + 5);
-    out[0] = MSG_TYPE_TERMDATA;
-    out[1] = 0;
-    out[2] = k + 1; /* includes session */
-    out[3] = wc->session;
-    memcpy(out + 4, tmp + 5, k);
+    k = strlen(find + 5);
+    if (k > 28)
+    {
+      tmp = (char *) malloc(k + 4);
+      j = 1;
+    }
+    else
+    {
+      tmp = out;
+      j = 0;
+    }
+    tmp[0] = MSG_TYPE_TERMDATA;
+    tmp[1] = 0;
+    tmp[2] = k + 1; /* includes session */
+    tmp[3] = wc->session;
+    memcpy(tmp + 4, find + 5, k);
     k += 4;
-    writeTargetSock(wc, out, k);
+    writeTargetSock(wc, tmp, k);
+    if (j) free(tmp);
   }
-  tmp = strstr((char *) wc->buffer, "size:");
-  if (tmp && wc->session != -1)
+  find = strstr((char *) wc->buffer, "size:");
+  if (find && wc->session != -1)
   {
-    sscanf(tmp + 5, "%hdx%hd", (unsigned short *) &j, (unsigned short *) &k);
+    sscanf(find + 5, "%hdx%hd", (unsigned short *) &j, (unsigned short *) &k);
     out[0] = MSG_TYPE_WINSIZE;
     out[1] = 0;
     out[2] = 5;
@@ -426,8 +438,8 @@ int processWsMessage(WebContext_t *wc, struct hashmap *context, struct hashmap *
     *(unsigned short *) &out[6] = htons((unsigned short) k);
     writeTargetSock(wc, out, 8);
   }
-  tmp = strstr((char *) wc->buffer, "flc");
-  if (tmp && wc->session != -1)
+  find = strstr((char *) wc->buffer, "flc");
+  if (find && wc->session != -1)
   {
     out[0] = MSG_TYPE_FILE;
     out[1] = 0;
@@ -435,15 +447,15 @@ int processWsMessage(WebContext_t *wc, struct hashmap *context, struct hashmap *
     out[3] = RTTY_FILE_MSG_CANCELED;
     writeTargetSock(wc, out, 4);
   }
-  tmp = strstr((char *) wc->buffer, "fls:");
-  if (tmp && wc->session != -1)
+  find = strstr((char *) wc->buffer, "fls:");
+  if (find && wc->session != -1)
   {
     printf("WEB: file start ack\n");
     out[0] = MSG_TYPE_FILE;
     out[1] = 0;
     out[2] = 1;
     out[3] = RTTY_FILE_MSG_CANCELED;
-    sscanf(tmp + 4, "%[^;];%d", wc->filename, (int *) &wc->filesize);
+    sscanf(find + 4, "%[^;];%d", wc->filename, (int *) &wc->filesize);
     if (wc->filesize > 0)
     {
       wc->file = (unsigned char *) malloc(wc->filesize);
@@ -454,11 +466,11 @@ int processWsMessage(WebContext_t *wc, struct hashmap *context, struct hashmap *
     } else
       writeTargetSock(wc, out, 4);
   }
-  tmp = strstr((char *) wc->buffer, "flu:");
-  if (tmp && wc->session != -1)
+  find = strstr((char *) wc->buffer, "flu:");
+  if (find && wc->session != -1)
   {
     printf("WEB: file upload\n");
-    EVP_DecodeBlock(wc->file, (unsigned char *) tmp + 4, wc->ptr - 4);
+    EVP_DecodeBlock(wc->file, (unsigned char *) find + 4, wc->ptr - 4);
     if (wc->file)
     {
       free(wc->file);
