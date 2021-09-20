@@ -36,7 +36,7 @@ typedef struct
   unsigned char filehold[3];
 } WebContext_t;
 
-int initWeb(char *basicauth, char *devicelistpath, char *terminalpath);
+int initWeb(char *devicelistpath, char *terminalpath);
 void acceptWeb(int clientSock, SSL_CTX *sslCtx, struct hashmap *context);
 void disconnectWeb(WebContext_t *wc);
 void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **shared);

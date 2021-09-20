@@ -181,7 +181,7 @@ static int wsUpgrade(char *data)
   return len;
 }
 
-int initWeb(char *basicauth, char *devicelistpath, char *terminalpath)
+int initWeb(char *devicelistpath, char *terminalpath)
 {
   FILE *fd = NULL;
   size_t len;
@@ -190,8 +190,6 @@ int initWeb(char *basicauth, char *devicelistpath, char *terminalpath)
   sd.referer[0] = 0;
   /* TODO: dynamic realloc based on device count */
   sprintf(sd.devices, "{\"devices\":[]}");
-  /* TODO: user hashmap */
-  sprintf(sd.auth, "Authorization: Basic %s", basicauth);
   fd = fopen(devicelistpath, "r");
   if (fd)
   {
@@ -611,6 +609,7 @@ void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **s
   char *tmpeol;
   uint32_t j;
   uint32_t k;
+  struct hkey hashkey = {0, 0};
 
   do
   {
@@ -677,10 +676,19 @@ void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **s
             }
           }
 
-          tmp = (char *) wc->buffer;
-          /* TODO: replace with multiuser auth hashmap */
-          if (strstr(tmp, sd.auth) != NULL)
+          tmp = strstr((char *) wc->buffer, "Authorization: Basic");
+          if (tmp != NULL)
           {
+            j = strchr(tmp + 21, '\n') - &tmp[21];
+            memcpy(sd.auth, tmp + 21, j);
+            if (sd.auth[j - 1] == '\r') j--;
+            sd.auth[j] = 0;
+            hashkey.length = j;
+            hashkey.data = sd.auth;
+          }
+          if (hashmap_get(shared[2], &hashkey) != NULL)
+          {
+            tmp = (char *) wc->buffer;
             if (strstr(tmp, "GET / ") != NULL)
             {
               writeLog(LOG_DEBUG, "WEB: index\n");

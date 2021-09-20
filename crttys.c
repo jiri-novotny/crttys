@@ -144,7 +144,8 @@ int main(int argc, char **argv)
   WebContext_t *wc;
   struct hashmap *websocks;
   struct hashmap *deviceids;
-  struct hashmap *shared[2];
+  struct hashmap *webauth;
+  struct hashmap *shared[3];
   struct hkey hashkey = {0, sizeof(int)};
 
   strcpy(devsslprefix, DEV_SSL_PREFIX);
@@ -312,7 +313,7 @@ int main(int argc, char **argv)
   }
 #endif
 
-  if (initWeb(basicauth, index, terminal) == 0)
+  if (initWeb(index, terminal) == 0)
   {
     perror("Unable to init webserver");
     SSL_CTX_free(deviceSslCtx);
@@ -336,8 +337,16 @@ int main(int argc, char **argv)
   devices = hashmap_create();
   websocks = hashmap_create();
   deviceids = hashmap_create();
+  webauth = hashmap_create();
   shared[0] = deviceids;
   shared[1] = websocks;
+  shared[2] = webauth;
+
+  hashkey.data = basicauth;
+  hashkey.length = strlen(basicauth);
+  hashmap_set(webauth, &hashkey, "Admin");
+  hashkey.length = sizeof(int);
+
   memset(epollInput, 0, sizeof(epollInput));
   run = 1;
   while (run)
