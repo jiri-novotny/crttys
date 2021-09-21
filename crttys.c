@@ -19,6 +19,7 @@
 #include "net.h"
 #include "device.h"
 #include "webserver.h"
+#include "config.h"
 #include "hashmap.h"
 #include "iterator.h"
 
@@ -29,6 +30,7 @@ static char devsslprefix[256];
 
 struct option opt[] = {
     { "auth",           1, NULL, 'a' },
+    { "auth-file",      1, NULL, 'A' },
     { "dev-port",       1, NULL, 'd' },
     { "dev-key",        1, NULL, 'k' },
     { "dev-cert",       1, NULL, 'c' },
@@ -46,6 +48,21 @@ void signalCallback(int sig)
   printf("signal %d\n", sig);
   if (sig == SIGINT || sig == SIGTERM)
     run = 0;
+}
+
+void cleanupAuth(struct hashmap *context)
+{
+  struct iterator *entries;
+  char *name;
+
+  entries = hashmap_iterator(context);
+  while (entries->next(entries))
+  {
+    name = ((struct hentry *) entries->current)->value;
+    free(name);
+  }
+  entries->destroy(entries);
+  hashmap_destroy(context);
 }
 
 #define DEV_SSL_PREFIX "LEMEL-"
@@ -130,6 +147,8 @@ int main(int argc, char **argv)
   char devkey[256];
   char webcert[256];
   char webkey[256];
+  char *tmp;
+  char useAuthFile = 0;
   
 	struct epoll_event epollServer;
   struct epoll_event epollInput[1 + MAX_CLIENTS];
@@ -146,11 +165,15 @@ int main(int argc, char **argv)
 
   strcpy(devsslprefix, DEV_SSL_PREFIX);
 
-  while((i = getopt_long(argc, argv, "a:d:k:c:v:V:w:K:C:h", opt, NULL)) != -1)
+  while((i = getopt_long(argc, argv, "a:A:d:k:c:v:V:w:K:C:h", opt, NULL)) != -1)
   {
     switch (i)
     {
       case 'a':
+        strncpy(basicauth, optarg, 255);
+        break;
+      case 'A':
+        useAuthFile = 1;
         strncpy(basicauth, optarg, 255);
         break;
       case 'd':
@@ -184,6 +207,7 @@ int main(int argc, char **argv)
         printf("USAGE: %s [options]\nOptions:\n" \
                "\t-h/--help\t\tPrint this help\n" \
                "\t-a/--auth\t\tBasic authorization for web access\n" \
+               "\t-A/--auth-file\t\tUser list for Basic authorization for web access\n" \
                "\t-d/--dev-port\t\tSet port for device access\n" \
                "\t-k/--dev-key\t\tPath to device SSL key\n" \
                "\t-c/--dev-cert\t\tPath to device SSL cert\n" \
@@ -242,6 +266,24 @@ int main(int argc, char **argv)
     close(deviceSock);
     return 2;
   }
+
+  devices = hashmap_create();
+  websocks = hashmap_create();
+  deviceids = hashmap_create();
+  webauth = hashmap_create();
+
+  if (useAuthFile)
+  {
+    configParse(basicauth, webauth);
+  }
+  else
+  {
+    tmp = strdup("Admin");
+    hashkey.data = basicauth;
+    hashkey.length = strlen(basicauth);
+    hashmap_set(webauth, &hashkey, tmp);
+  }
+  hashkey.length = sizeof(int);
 
 #if ENABLE_SSL || ENABLE_WEB_SSL
   OPENSSL_init_ssl(OPENSSL_INIT_LOAD_SSL_STRINGS | OPENSSL_INIT_LOAD_CRYPTO_STRINGS, NULL);
@@ -314,18 +356,9 @@ int main(int argc, char **argv)
   epollServer.events = EPOLLIN;
   epoll_ctl(epollFd, EPOLL_CTL_ADD, wsSock, &epollServer);
 
-  devices = hashmap_create();
-  websocks = hashmap_create();
-  deviceids = hashmap_create();
-  webauth = hashmap_create();
   shared[0] = deviceids;
   shared[1] = websocks;
   shared[2] = webauth;
-
-  hashkey.data = basicauth;
-  hashkey.length = strlen(basicauth);
-  hashmap_set(webauth, &hashkey, "Admin");
-  hashkey.length = sizeof(int);
 
   memset(epollInput, 0, sizeof(epollInput));
   run = 1;
@@ -375,9 +408,9 @@ int main(int argc, char **argv)
     }
   }
   printf("normal exit\n");
-
   cleanupDevices(devices);
   cleanupWeb(websocks);
+  cleanupAuth(webauth);
   close(deviceSock);
   close(wsSock);
   hashmap_destroy(deviceids);

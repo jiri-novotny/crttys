@@ -17,8 +17,7 @@ Reuse working client and add new features to server
 
 ## Known limitations
 * Web is using basic authorization which can be in collision with proxied web app
-* Web proxy can fail with very large single-page websites (>400KB)
-* File transfer is not implemented
+* File transfer to device is not implemented
 * Currently tested with ~10 devices
 
 ## Build
@@ -26,21 +25,23 @@ Reuse working client and add new features to server
 
 ## Dependencies
 * openssl - tested with 1.1.1f
-* hasmap from libds https://github.com/dgraham/libds (part of repo)
+* hashmap from libds https://github.com/dgraham/libds (part of repo)
+* JSON tokenizer from https://github.com/zserge/jsmn (part of repo)
 
 ## Usage
 Options
 ```
--h/--help	    	Print this help
--a/--auth		    Basic authorization for web access
--d/--dev-port		Set port for device access
--k/--dev-key		Path to device SSL key
--c/--dev-cert		Path to device SSL cert
--v/--dev-verify		Path to device verification cert dir
--V/--dev-ssl-prefix	Set device certificate prefix
--w/--web-port		Set port for web access
--K/--web-key		Path to web SSL key
--C/--web-cert		Path to web SSL cert
+-h/--help               Print this help
+-a/--auth               Basic authorization for web access
+-A/--auth-file          User list for Basic authorization for web access
+-d/--dev-port           Port for device access
+-k/--dev-key            Path to device SSL key
+-c/--dev-cert           Path to device SSL cert
+-v/--dev-verify         Path to device verification cert dir
+-V/--dev-ssl-prefix     Set device certificate prefix
+-w/--web-port           Port for web access
+-K/--web-key            Path to web SSL key
+-C/--web-cert           Path to web SSL cert
 ```
 
 Example
