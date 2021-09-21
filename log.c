@@ -14,7 +14,7 @@ void writeLog(LogLevel_t ll, char *logline, ...)
   time_t raw;
   struct tm *ti;
 
-  //if (cfg.verbose >= ll)
+  if (LOGLEVEL >= ll)
   {
     struct timeval tsp;
     gettimeofday(&tsp, NULL);

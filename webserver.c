@@ -693,6 +693,7 @@ void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **s
           }
           else
           {
+            writeLog(LOG_WARN, "WEB: invalid auth %s\n", sd.auth);
             writeWebSock(wc, UNAUTH, strlen(UNAUTH));
           }
           wc->ptr = 0;
