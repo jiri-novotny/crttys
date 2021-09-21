@@ -39,13 +39,11 @@ Options
 -v/--dev-verify		Path to device verification cert dir
 -V/--dev-ssl-prefix	Set device certificate prefix
 -w/--web-port		Set port for web access
--x/--web-key		Path to web SSL key
--z/--web-cert		Path to web SSL cert
--i/--index-page		Path to index page
--t/--terminal-page	Path to terminal page
+-K/--web-key		Path to web SSL key
+-C/--web-cert		Path to web SSL cert
 ```
 
 Example
 ```
-crttys -a `cat /usr/local/etc/crttys/auth` -d 1234 -w 443 -k /usr/local/etc/crttys/key.pem -c /usr/local/etc/crttys/cert.pem -v /usr/local/etc/crttys/devices/ -x /etc/ssl/private/ssl-cert-snakeoil.key -z /etc/ssl/certs/ssl-cert-snakeoil.pem -i /usr/local/etc/crttys/index.html -t /usr/local/etc/crttys/terminal.html
+crttys -a `cat /usr/local/etc/crttys/auth` -d 1234 -w 443 -k /usr/local/etc/crttys/key.pem -c /usr/local/etc/crttys/cert.pem -v /usr/local/etc/crttys/devices/ -x /etc/ssl/private/ssl-cert-snakeoil.key -z /etc/ssl/certs/ssl-cert-snakeoil.pem
 ```

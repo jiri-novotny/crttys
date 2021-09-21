@@ -35,10 +35,8 @@ struct option opt[] = {
     { "dev-verify",     1, NULL, 'v' },
     { "dev-ssl-prefix", 1, NULL, 'V' },
     { "web-port",       1, NULL, 'w' },
-    { "web-key",        1, NULL, 'x' },
-    { "web-cert",       1, NULL, 'y' },
-    { "index-page",     1, NULL, 'i' },
-    { "terminal-page",  1, NULL, 't' },
+    { "web-key",        1, NULL, 'K' },
+    { "web-cert",       1, NULL, 'C' },
     { "help",           0, NULL, 'h' },
     { NULL,             0, NULL, 0 }
 };
@@ -128,8 +126,6 @@ int main(int argc, char **argv)
   unsigned short port = 4433;
   unsigned short wsport = 8080;
   char basicauth[256] = "YWRtaW46QURNSU4=";
-  char index[256] = "./web/index.html";
-  char terminal[256] = "./web/terminal.html";
   char devcert[256];
   char devkey[256];
   char webcert[256];
@@ -150,7 +146,7 @@ int main(int argc, char **argv)
 
   strcpy(devsslprefix, DEV_SSL_PREFIX);
 
-  while((i = getopt_long(argc, argv, "a:d:k:c:v:V:w:x:z:i:t:h", opt, NULL)) != -1)
+  while((i = getopt_long(argc, argv, "a:d:k:c:v:V:w:K:C:h", opt, NULL)) != -1)
   {
     switch (i)
     {
@@ -175,17 +171,11 @@ int main(int argc, char **argv)
       case 'w':
         wsport = atoi(optarg);;
         break;
-      case 'x':
+      case 'K':
         strncpy(webkey, optarg, 255);
         break;
-      case 'z':
+      case 'C':
         strncpy(webcert, optarg, 255);
-        break;
-      case 'i':
-        strncpy(index, optarg, 255);
-        break;
-      case 't':
-        strncpy(terminal, optarg, 255);
         break;
       case 'h':
         ret = 0;
@@ -200,10 +190,8 @@ int main(int argc, char **argv)
                "\t-v/--dev-verify\t\tPath to device verification cert dir\n" \
                "\t-V/--dev-ssl-prefix\tSet device certificate prefix\n" \
                "\t-w/--web-port\t\tSet port for web access\n" \
-               "\t-x/--web-key\t\tPath to web SSL key\n" \
-               "\t-z/--web-cert\t\tPath to web SSL cert\n" \
-               "\t-i/--index-page\t\tPath to index page\n" \
-               "\t-t/--terminal-page\tPath to terminal page\n" \
+               "\t-K/--web-key\t\tPath to web SSL key\n" \
+               "\t-C/--web-cert\t\tPath to web SSL cert\n" \
                , argv[0]);
         exit(ret);
     }
