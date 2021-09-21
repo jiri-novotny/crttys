@@ -313,15 +313,7 @@ int main(int argc, char **argv)
   }
 #endif
 
-  if (initWeb(index, terminal) == 0)
-  {
-    perror("Unable to init webserver");
-    SSL_CTX_free(deviceSslCtx);
-    SSL_CTX_free(wsSslCtx);
-    close(deviceSock);
-    close(wsSock);
-    return 3;
-  }
+  initWeb();
 
   memset(&epollServer, 0, sizeof(struct epoll_event));
 

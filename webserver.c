@@ -11,19 +11,18 @@
 #define SWITCH_PROTO      "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: "
 #define NOT_FOUND         "HTTP/1.1 404 Not found\r\nConnection: close\r\nContent-type: text/html\r\nContent-Length: 93\r\n\r\n<html><head><title>Device proxy - Not found</title></head><body><h2>Device not connected</h2>"
 #define UNAUTH            "HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-type: text/html\r\nWWW-Authenticate: Basic realm=\"restricted\"\r\nContent-Length: 95\r\n\r\n<html><head><title>Device proxy - Unauthorized</title></head><body><h2>User not authorized</h2>"
-#define HEADER            "HTTP/1.1 200 OK\r\nWWW-Authenticate: Basic realm=\"restricted\"\r\nContent-Length: "
-#define WS_ERR            "{\"code\":500}"
+
+extern char webIndex[];
+extern int webIndexLen;
+extern char webTerminal[];
+extern int webTerminalLen;
 
 typedef struct
 {
-  char *devicelist;
-  int devicelistlen;
-  char *terminal;
-  int terminallen;
   char auth[512];
   char devices[2048];
   int deviceslen;
-  char referer[128];
+  char referer[256];
 } ServerData_t;
 
 static ServerData_t sd;
@@ -94,7 +93,7 @@ static void parseWebReqUrl(WebContext_t *wc, struct hashmap **shared, char *buff
   if (i == 1 && port == 0)
   {
     writeLog(LOG_DEBUG, "WEB: terminal\n");
-    writeWebSock(wc, sd.terminal, sd.terminallen);
+    writeWebSock(wc, webTerminal, webTerminalLen);
   }
   else if (port != 0)
   {
@@ -135,7 +134,7 @@ static void parseWebReqReferer(WebContext_t *wc, struct hashmap **shared, char *
     else if (i == 1 && port == 0)
     {
       writeLog(LOG_DEBUG, "WEB: terminal\n");
-      writeWebSock(wc, sd.terminal, sd.terminallen);
+      writeWebSock(wc, webTerminal, webTerminalLen);
     }
     else
     {
@@ -181,50 +180,13 @@ static int wsUpgrade(char *data)
   return len;
 }
 
-int initWeb(char *devicelistpath, char *terminalpath)
+int initWeb()
 {
-  FILE *fd = NULL;
-  size_t len;
-  int ret = 0;
-
   sd.referer[0] = 0;
   /* TODO: dynamic realloc based on device count */
   sprintf(sd.devices, "{\"devices\":[]}");
-  fd = fopen(devicelistpath, "r");
-  if (fd)
-  {
-    fseek(fd, 0, SEEK_END);
-    len = ftell(fd);
-    rewind(fd);
-    sd.devicelist = (char *) malloc(len + 96);
-    if (sd.devicelist)
-    {
-      ret = sprintf(sd.devicelist, "%s%lu\r\n\r\n", HEADER, len);
-      fread(sd.devicelist + ret, 1, len, fd);
-      sd.devicelistlen = ret + len;
-      fclose(fd);
 
-      fd = fopen(terminalpath, "r");
-      if (fd)
-      {
-        fseek(fd, 0, SEEK_END);
-        len = ftell(fd);
-        rewind(fd);
-        sd.terminal = (char *) malloc(len + 96);
-        if (sd.terminal)
-        {
-          ret = sprintf(sd.terminal, "%s%lu\r\n\r\n", HEADER, len);
-          fread(sd.terminal + ret, 1, len, fd);
-          sd.terminallen = ret + len;
-          ret = 1;
-        }
-        fclose(fd);
-      }
-    }
-    else fclose(fd);
-  }
-
-  return ret;
+  return 0;
 }
 
 void acceptWeb(int clientSock, SSL_CTX *sslCtx, struct hashmap *context)
@@ -704,7 +666,7 @@ void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **s
             if (strstr(tmp, "GET / ") != NULL)
             {
               writeLog(LOG_DEBUG, "WEB: index\n");
-              writeWebSock(wc, sd.devicelist, sd.devicelistlen);
+              writeWebSock(wc, webIndex, webIndexLen);
             }
             else if (strstr(tmp, "GET /ws ") != NULL)
             {
@@ -811,7 +773,4 @@ void cleanupWeb(struct hashmap *context)
   }
   entries->destroy(entries);
   hashmap_destroy(context);
-
-  if (sd.devicelist) free(sd.devicelist);
-  if (sd.terminal) free(sd.terminal);
 }

@@ -50,4 +50,9 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+
+.vscode**
 crttys
+hexgen
+index.c
+terminal.c
