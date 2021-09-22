@@ -39,6 +39,7 @@ struct option opt[] = {
     { "web-port",       1, NULL, 'w' },
     { "web-key",        1, NULL, 'K' },
     { "web-cert",       1, NULL, 'C' },
+    { "web-verify",     1, NULL, 'X' },
     { "help",           0, NULL, 'h' },
     { NULL,             0, NULL, 0 }
 };
@@ -147,6 +148,7 @@ int main(int argc, char **argv)
   char devkey[256];
   char webcert[256];
   char webkey[256];
+  char webverifypath[256];
   char *tmp;
   char useAuthFile = 0;
   
@@ -165,7 +167,7 @@ int main(int argc, char **argv)
 
   strcpy(devsslprefix, DEV_SSL_PREFIX);
 
-  while((i = getopt_long(argc, argv, "a:A:d:k:c:v:V:w:K:C:h", opt, NULL)) != -1)
+  while((i = getopt_long(argc, argv, "a:A:d:k:c:v:V:w:K:C:X:h", opt, NULL)) != -1)
   {
     switch (i)
     {
@@ -200,6 +202,9 @@ int main(int argc, char **argv)
       case 'C':
         strncpy(webcert, optarg, 255);
         break;
+      case 'X':
+        strncpy(webverifypath, optarg, 255);
+        break;
       case 'h':
         ret = 0;
         __attribute__ ((fallthrough));
@@ -216,6 +221,7 @@ int main(int argc, char **argv)
                "\t-w/--web-port\t\tSet port for web access\n" \
                "\t-K/--web-key\t\tPath to web SSL key\n" \
                "\t-C/--web-cert\t\tPath to web SSL cert\n" \
+               "\t-X/--web-verify\t\tPath to certificate chain\n" \
                , argv[0]);
         exit(ret);
     }
@@ -315,6 +321,7 @@ int main(int argc, char **argv)
     SSL_CTX_load_verify_locations(deviceSslCtx, NULL, devverifypath);
     SSL_CTX_set_verify(deviceSslCtx, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, SSLVerifyCallback);
   }
+  SSL_CTX_set_cipher_list(deviceSslCtx, "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-RSA-AES128-GCM-SHA256");
 #endif
 
 #if ENABLE_WEB_SSL
@@ -340,6 +347,11 @@ int main(int argc, char **argv)
       close(wsSock);
       return 9;
     }
+    if (webverifypath[0] != 0)
+    {
+      SSL_CTX_load_verify_locations(wsSslCtx, webverifypath, NULL);
+    }
+    SSL_CTX_set_cipher_list(wsSslCtx, "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-SHA384:ECDHE-RSA-AES128-SHA256");
   }
 #endif
 
