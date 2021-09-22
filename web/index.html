@@ -1,7 +1,8 @@
 <!doctype html>
-  <html>
+  <html lang="en-US">
     <head>
       <title>Device proxy - Device list</title>
+      <meta charset="utf-8">
       <style>
         .device-container {
           display: block;
@@ -41,10 +42,12 @@
           margin-right: 20px;
         }
       </style>
+      <link rel="icon" href="https://www.clker.com/cliparts/8/n/Q/V/t/R/terminal-icon-th.png" type="image/png">
     </head>
     <body>
       <h2>Device list</h2>
       <div id="logo">
+        <img src="https://www.clker.com/cliparts/0/f/b/8/12065639621993957516artmaster_logout_mini_icon.svg.thumb.png" alt="logout" height="25px" onclick="logout()">
         <img id=connection src="https://www.clker.com/cliparts/F/j/3/t/Z/8/disconnect-th.png" alt="connection status" height="25px">
       </div>
       <div id="content">
@@ -54,6 +57,14 @@
         var connection = document.getElementById("connection");
         var ws;
 
+        function logout() {
+          var xhr = new XMLHttpRequest();
+          xhr.open("GET", "/", true);
+          xhr.setRequestHeader("Authorization", "Basic Ogo=");
+          xhr.send(null);
+          location.reload();
+        }
+
         if ("WebSocket" in window) {
           ws = new WebSocket(window.location.origin.replace('http', 'ws') + "/ws");
           ws.onopen = () => {
@@ -61,7 +72,13 @@
             ws.send("list");
           };
           ws.onmessage = m => {
-            var resp = JSON.parse(m.data);
+            try {
+              var resp = JSON.parse(m.data);
+            }
+            catch (e)
+            {
+              console.log(m.data);
+            }
             if (typeof resp.devices != "undefined")
             {
               parent.innerText = "";
@@ -103,6 +120,7 @@
           };
           ws.onclose = () => {
             connection.src = "https://www.clker.com/cliparts/F/j/3/t/Z/8/disconnect-th.png";
+            parent.innerText = "";
             console.log('Connection is closed');
             setTimeout(function() {
                   var ws2 = new WebSocket(ws.url);
