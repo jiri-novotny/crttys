@@ -239,7 +239,8 @@ void disconnectWeb(WebContext_t *wc)
     wc->ssl = NULL;
   }
 #endif
-  writeLog(LOG_DEBUG, "WEB: fd %d closing\n", wc->sock);
+  if (wc->init) writeLog(LOG_INFO, "WS:  fd %d closing\n", wc->sock);
+  else writeLog(LOG_INFO, "WEB: fd %d closing\n", wc->sock);
   close(wc->sock);
   free(wc->buffer);
   free(wc);

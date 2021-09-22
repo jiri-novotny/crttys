@@ -6,6 +6,7 @@
 
 #include "device.h"
 #include "webserver.h"
+#include "log.h"
 
 extern unsigned int wsBuildBuffer(char *response, unsigned int len, unsigned char *buffer);
 
@@ -406,7 +407,7 @@ void acceptDevice(int clientSock, SSL_CTX *sslCtx, struct hashmap *context)
   }
   else
   {
-    perror("DEV: context alloc");
+    writeLog(LOG_ERR, "DEV: context alloc %s\n", strerror(errno));
     close(clientSock);
   }
 }
@@ -421,7 +422,7 @@ void disconnectDevice(DeviceContext_t *dc)
     dc->ssl = NULL;
   }
 #endif
-  printf("DEV: fd %d closing\n", dc->sock);
+  writeLog(LOG_INFO, "DEV: fd %d closing\n", dc->sock);
   close(dc->sock);
   free(dc);
 }
