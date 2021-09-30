@@ -31,15 +31,6 @@ static void clearDisconnectDevice(DeviceContext_t *dc, struct hashmap *context, 
   hashkey.length = dc->deviceidlen;
   hashmap_remove(shared[0], &hashkey);
 
-#if 0
-  for (i = 0; i < 5; i++)
-  {
-    if (dc->sessions[i] != NULL)
-    {
-      disconnectWeb(dc->sessions[i]);
-    }
-  }
-#else
   hashkey.length = sizeof(int);
   for (i = 0; i < 5; i++)
   {
@@ -58,13 +49,12 @@ static void clearDisconnectDevice(DeviceContext_t *dc, struct hashmap *context, 
       wc = (WebContext_t *) hashmap_get(shared[1], &hashkey);
       if (wc)
       {
-        printf("DEV: session closed %d\n", sesfd);
+        writeLog(LOG_NOTICE, "DEV: session closed %d\n", sesfd);
         hashmap_remove(shared[1], &hashkey);
         disconnectWeb(wc);
       }
     }
   }
-#endif
 
   createList(shared);
   removeDisconnectDevice(dc, context);
@@ -103,11 +93,11 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
           if (dc->webdefault[0] == 0) strcpy(dc->webdefault, "80");
           memset(out, 0, 4);
           rlen = 4;
-          printf("DEV: %s - %s (%d)\n", dc->deviceid, dc->desc, dc->sock);
+          writeLog(LOG_NOTICE, "DEV: %s - %s (%d)\n", dc->deviceid, dc->desc, dc->sock);
           hashmap_set(shared[0], &hashkey, dc);
           if (errno != 0)
           {
-            printf("DEV: id insert fail\n");
+            writeLog(LOG_WARN, "DEV: id insert fail\n");
           }
           else
           {
@@ -116,7 +106,7 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
         }
         else
         {
-          printf("DEV: id not unique\n");
+          writeLog(LOG_ERR, "DEV: id not unique\n");
           strcpy((char *) &out[3], "XError non-unique ID");
           out[2] = strlen((char *) &out[3]);
           rlen = out[2];
@@ -150,7 +140,7 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
         rlen = dc->sessions[tmp[3] & 3];
         dc->sessions[tmp[3] & 3] = -1;
 #endif
-        printf("DEV: session closed %d\n", rlen);
+        writeLog(LOG_NOTICE, "DEV: session closed %d\n", rlen);
         hashkey.data = &rlen;
         hashkey.length = sizeof(int);
         wc = (WebContext_t *) hashmap_get(shared[1], &hashkey);
@@ -182,7 +172,7 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
         break;
 
       case MSG_TYPE_CMD:
-        printf("DEV: CMD not supported\n");
+        writeLog(LOG_WARN, "DEV: CMD not supported\n");
         rlen = 0;
         break;
 
@@ -211,11 +201,7 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
           {
             memcpy(tmp, "flo", 3);
             rlen = wsBuildBuffer((char *) tmp, 3, out);
-#if ENABLE_WEB_SSL
-            SSL_write(wc->ssl, out, rlen);
-#else
-            write(wc->sock, out, rlen);
-#endif
+            writeWebSock(wc, out, rlen);
           }
           out[0] = MSG_TYPE_FILE;
           out[1] = 0;
@@ -224,6 +210,7 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
           rlen = 4;
           break;
         case RTTY_FILE_MSG_INFO:
+          writeLog(LOG_DEBUG, "DEV: RTTY_FILE_MSG_INFO\n");
           if (wc)
           {
             wc->fileptr = 0;
@@ -232,17 +219,13 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
 
             memcpy(tmp + 1, "fli:", 4);
             rlen = wsBuildBuffer((char *) tmp + 1, len + 2, out);
-#if ENABLE_WEB_SSL
-            SSL_write(wc->ssl, out, rlen);
-#else
-            write(wc->sock, out, rlen);
-#endif
+            writeWebSock(wc, out, rlen);
+            out[0] = MSG_TYPE_FILE;
+            out[1] = 0;
+            out[2] = 1;
+            out[3] = RTTY_FILE_MSG_DATA_ACK;
+            rlen = 4;
           }
-          out[0] = MSG_TYPE_FILE;
-          out[1] = 0;
-          out[2] = 1;
-          out[3] = RTTY_FILE_MSG_DATA_ACK;
-          rlen = 4;
           break;
         case RTTY_FILE_MSG_DATA:
           if (wc)
@@ -254,43 +237,13 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
                 memcpy(wc->file, "fld:", 4);
                 rlen = EVP_EncodeBlock(wc->file + 4, wc->filehold, wc->fileptr);
                 rlen = wsBuildBuffer((char *) wc->file, rlen + 4, out);
-#if ENABLE_WEB_SSL
-                SSL_write(wc->ssl, out, rlen);
-#else
-                write(wc->sock, out, rlen);
-#endif
+                writeWebSock(wc, out, rlen);
                 free(wc->file);
                 wc->file = NULL;
               }
             }
             else
             {
-#if 0
-              if (wc->fileptr >= wc->filesize)
-              {
-                printf("DEV: file realloc needed\n");
-                wc->filesize *= 2;
-                tmp = realloc(wc->file, wc->filesize);
-                if (tmp)
-                {
-                  printf("DEV: file realloc ok\n");
-                  wc->file = tmp;
-                }
-                else
-                {
-                  printf("DEV: file realloc fail\n");
-                  free(wc->file);
-                  wc->file = NULL;
-                }
-              }
-              if (wc->file)
-              {
-                printf("DEV: file part stored\n");
-                tmp = dc->in + dc->plen + 5;
-                memcpy(wc->file + wc->fileptr, tmp, len - 2);
-                wc->fileptr += len - 2;
-              }
-#else
               memcpy(wc->file, "flp:", 4);
               memcpy(dc->in + dc->plen + 5 - wc->fileptr, wc->filehold, wc->fileptr);
               out[0] = ((wc->fileptr + (len - 2)) % 3);
@@ -298,12 +251,7 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
               wc->fileptr = out[0];
               memcpy(wc->filehold, dc->in + dc->plen + 5 + len - wc->fileptr - 2, wc->fileptr);
               rlen = wsBuildBuffer((char *) wc->file, rlen + 4, out);
-#if ENABLE_WEB_SSL
-              SSL_write(wc->ssl, out, rlen);
-#else
-              write(wc->sock, out, rlen);
-#endif
-#endif
+              writeWebSock(wc, out, rlen);
             }
           }
           out[0] = MSG_TYPE_FILE;
@@ -312,21 +260,50 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
           out[3] = RTTY_FILE_MSG_DATA_ACK;
           rlen = 4;
           break;
+        case RTTY_FILE_MSG_DATA_ACK:
+          writeLog(LOG_DEBUG, "DEV: RTTY_FILE_MSG_DATA_ACK\n");
+          if (wc)
+          {
+            out[0] = MSG_TYPE_FILE;
+            out[3] = RTTY_FILE_MSG_DATA;
+            if (wc->filesize > 0)
+            {
+              if (wc->filesize > DEVICE_BUFFER_FILE)
+                rlen = DEVICE_BUFFER_FILE;
+              else
+                rlen = wc->filesize;
+              memcpy(&out[4], wc->file + wc->fileptr, rlen);
+              wc->filesize -= DEVICE_BUFFER_FILE;
+              wc->fileptr += rlen;
+              if (wc->filesize <= 0)
+              {
+                free(wc->file);
+                wc->file = NULL;
+              }
+            }
+            else
+            {
+              rlen = 0;
+              free(wc->file);
+              wc->file = NULL;
+            }
+            *(unsigned short *) &out[1] = htons((unsigned short) rlen + 1);
+            rlen += 4;
+          }
+          break;
         case RTTY_FILE_MSG_CANCELED:
-          printf("DEV: RTTY_FILE_MSG_CANCELED\n");
+          writeLog(LOG_DEBUG, "DEV: RTTY_FILE_MSG_CANCELED\n");
           if (wc && wc->file)
           {
+            wc->filesize = 0;
+            wc->fileptr = 0;
             free(wc->file);
             wc->file = NULL;
           }
           rlen = 0;
           break;
-        case RTTY_FILE_MSG_PROGRESS:
-          printf("DEV: RTTY_FILE_MSG_PROGRESS\n");
-          rlen = 0;
-          break;
         default:
-          printf("DEV: FILE not supported %02x\n", tmp[4]);
+          writeLog(LOG_ERR, "DEV: FILE not supported %02x\n", tmp[4]);
           rlen = 0;
           break;
         }
@@ -339,10 +316,10 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
         if (wc)
         {
           wc->stat += len - 18;
-          printf("DEV: web %d %d %d\n", wc->sock, len, wc->stat);
+          writeLog(LOG_DEBUG, "DEV: web %d %d %d\n", wc->sock, len, wc->stat);
           writeWebSock(wc, tmp + 21, len - 18);
         }
-        else printf("DEV: not found %d\n", wc->sock);
+        else writeLog(LOG_NOTICE, "DEV: not found %d\n", wc->sock);
         rlen = 0;
         break;
 
@@ -430,9 +407,9 @@ void disconnectDevice(DeviceContext_t *dc)
 inline void writeDevSock(DeviceContext_t *dc, const void* data, int len)
 {
 #if ENABLE_SSL
-    SSL_write(dc->ssl, data, len);
+  SSL_write(dc->ssl, data, len);
 #else
-    write(dc->sock, data, len);
+  write(dc->sock, data, len);
 #endif
 }
 
@@ -477,7 +454,7 @@ void handleDeviceData(DeviceContext_t *dc, struct hashmap *context, struct hashm
       else
       {
 #if ENABLE_SSL
-        printf("DEV: ssl err %d\n", SSL_get_error(dc->ssl, ret));
+        writeLog(LOG_ERR, "DEV: ssl err %d\n", SSL_get_error(dc->ssl, ret));
 #else
         perror("DEV: read()");
 #endif

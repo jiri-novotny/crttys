@@ -239,6 +239,7 @@ void disconnectWeb(WebContext_t *wc)
     wc->ssl = NULL;
   }
 #endif
+  if (wc->file) free(wc->file);
   if (wc->init) writeLog(LOG_INFO, "WS:  fd %d closing\n", wc->sock);
   else writeLog(LOG_INFO, "WEB: fd %d closing\n", wc->sock);
   close(wc->sock);
@@ -265,12 +266,12 @@ inline void writeWebSock(WebContext_t *wc, const void* data, int len)
 #endif
 }
 
-inline void writeTargetSock(WebContext_t *wc, const void* data, int len)
+inline void writeTargetSock(WebContext_t *wc, const void *data, int len)
 {
 #if ENABLE_SSL
-    SSL_write(wc->target, data, len);
+  SSL_write(wc->target, data, len);
 #else
-    write(wc->target, data, len);
+  write(wc->target, data, len);
 #endif
 }
 
@@ -308,7 +309,6 @@ unsigned int wsBuildBuffer(char *response, unsigned int len, unsigned char *buff
 
 int processWsMessage(WebContext_t *wc, struct hashmap *context, struct hashmap **shared)
 {
-  char *find;
   char *tmp;
   char out[32];
   uint32_t j;
@@ -316,8 +316,7 @@ int processWsMessage(WebContext_t *wc, struct hashmap *context, struct hashmap *
   struct hkey hashkey;
   DeviceContext_t *dc;
 
-  find = strstr((char *) wc->buffer, "list");
-  if (find)
+  if (0 == strncmp((char *) wc->buffer, "list", 4))
   {
     wc->index = 1;
     tmp = malloc(sd.deviceslen + 30);
@@ -325,11 +324,10 @@ int processWsMessage(WebContext_t *wc, struct hashmap *context, struct hashmap *
     writeWebSock(wc, tmp, k);
     free(tmp);
   }
-  find = strstr((char *) wc->buffer, "init:");
-  if (find)
+  if (0 == strncmp((char *) wc->buffer, "init:", 5))
   {
-    hashkey.data = find + 5;
-    hashkey.length = strlen(find + 5);
+    hashkey.data = wc->buffer + 5;
+    hashkey.length = strlen((char *) &wc->buffer[5]);
     dc = hashmap_get(shared[0], &hashkey);
     if (dc != NULL)
     {
@@ -346,7 +344,7 @@ int processWsMessage(WebContext_t *wc, struct hashmap *context, struct hashmap *
       if (dc->pending == -1)
       {
         dc->pending = wc->sock;
-        printf("WEB: sent login pending %d (%d)\n", dc->pending, dc->sock);
+        writeLog(LOG_NOTICE, "WEB: sent login pending %d (%d)\n", dc->pending, dc->sock);
         memset(out, 0 , 4);
         out[0] = MSG_TYPE_LOGIN;
 #if ENABLE_SSL
@@ -366,10 +364,9 @@ int processWsMessage(WebContext_t *wc, struct hashmap *context, struct hashmap *
       removeDisconnectWeb(wc, context);
     }
   }
-  find = strstr((char *) wc->buffer, "data:");
-  if (find && wc->session != -1)
+  if (0 == strncmp((char *) wc->buffer, "data:", 5) && wc->session != -1)
   {
-    k = strlen(find + 5);
+    k = strlen((char *) &wc->buffer[5]);
     if (k > 28)
     {
       tmp = (char *) malloc(k + 4);
@@ -384,15 +381,14 @@ int processWsMessage(WebContext_t *wc, struct hashmap *context, struct hashmap *
     tmp[1] = 0;
     tmp[2] = k + 1; /* includes session */
     tmp[3] = wc->session;
-    memcpy(tmp + 4, find + 5, k);
+    memcpy(tmp + 4, wc->buffer + 5, k);
     k += 4;
     writeTargetSock(wc, tmp, k);
     if (j) free(tmp);
   }
-  find = strstr((char *) wc->buffer, "size:");
-  if (find && wc->session != -1)
+  if (0 == strncmp((char *) wc->buffer, "size:", 5) && wc->session != -1)
   {
-    sscanf(find + 5, "%hdx%hd", (unsigned short *) &j, (unsigned short *) &k);
+    sscanf((char *) &wc->buffer[5], "%hdx%hd", (unsigned short *) &j, (unsigned short *) &k);
     out[0] = MSG_TYPE_WINSIZE;
     out[1] = 0;
     out[2] = 5;
@@ -401,50 +397,86 @@ int processWsMessage(WebContext_t *wc, struct hashmap *context, struct hashmap *
     *(unsigned short *) &out[6] = htons((unsigned short) k);
     writeTargetSock(wc, out, 8);
   }
-  find = strstr((char *) wc->buffer, "flc");
-  if (find && wc->session != -1)
+  if (0 == strncmp((char *) wc->buffer, "flc", 3) && wc->session != -1)
   {
+    writeLog(LOG_NOTICE, "WEB: file cancel ws\n");
     out[0] = MSG_TYPE_FILE;
     out[1] = 0;
     out[2] = 1;
     out[3] = RTTY_FILE_MSG_CANCELED;
     writeTargetSock(wc, out, 4);
-  }
-  find = strstr((char *) wc->buffer, "fls:");
-  if (find && wc->session != -1)
-  {
-    printf("WEB: file start ack\n");
-    out[0] = MSG_TYPE_FILE;
-    out[1] = 0;
-    out[2] = 1;
-    out[3] = RTTY_FILE_MSG_CANCELED;
-    sscanf(find + 4, "%[^;];%d", wc->filename, (int *) &wc->filesize);
-    if (wc->filesize > 0)
-    {
-      wc->file = (unsigned char *) malloc(wc->filesize);
-      if (NULL == wc->file)
-      {
-        writeTargetSock(wc, out, 4);
-      }
-    } else
-      writeTargetSock(wc, out, 4);
-  }
-  find = strstr((char *) wc->buffer, "flu:");
-  if (find && wc->session != -1)
-  {
-    printf("WEB: file upload\n");
-    EVP_DecodeBlock(wc->file, (unsigned char *) find + 4, wc->ptr - 4);
     if (wc->file)
     {
       free(wc->file);
       wc->file = NULL;
-      wc->filename[0] = 0;
+      wc->filesize = 0;
     }
+  }
+  if (0 == strncmp((char *) wc->buffer, "fls:", 4) && wc->session != -1)
+  {
+    writeLog(LOG_DEBUG, "WEB: file start ack\n");
     out[0] = MSG_TYPE_FILE;
     out[1] = 0;
     out[2] = 1;
     out[3] = RTTY_FILE_MSG_CANCELED;
-    writeTargetSock(wc, out, 4);
+    sscanf((char *) &wc->buffer[4], "%[^;];%d", wc->filename, (int *) &wc->filesize);
+    if (wc->filesize > 0)
+    {
+      writeLog(LOG_DEBUG, "WS:  file upload: %s (%d)\n", wc->filename, wc->filesize);
+      wc->file = (unsigned char *) malloc(wc->filesize + 1);
+      if (NULL == wc->file)
+      {
+        writeLog(LOG_WARN, "WS:  file cancel mem\n");
+        writeTargetSock(wc, out, 4);
+      }
+      else
+      {
+        out[2] = 5 + strlen(wc->filename);
+        out[3] = RTTY_FILE_MSG_INFO;
+        *(unsigned int *) &out[4] = htonl((uint32_t) wc->filesize);
+        strcpy(&out[8], wc->filename);
+        wc->fileptr = 0;
+        writeTargetSock(wc, out, out[2] + 3);
+      }
+    }
+    else
+    {
+      writeLog(LOG_WARN, "WS:  file cancel size\n");
+      writeTargetSock(wc, out, 4);
+    }
+  }
+  if (0 == strncmp((char *) wc->buffer, "flu:", 4) && wc)
+  {
+    writeLog(LOG_DEBUG, "WS:  file upload\n");
+    if (wc->file)
+    {
+      EVP_DecodeBlock(wc->file, (unsigned char *) wc->buffer + 4, wc->tlen - 4);
+      out[0] = MSG_TYPE_FILE;
+      out[3] = RTTY_FILE_MSG_DATA;
+      if (wc->filesize > DEVICE_BUFFER_FILE)
+        k = DEVICE_BUFFER_FILE;
+      else
+        k = wc->filesize;
+      *(unsigned short *) &out[1] = htons((unsigned short) k + 1);
+      writeTargetSock(wc, out, 4);
+      writeTargetSock(wc, wc->file, k);
+      wc->filesize -= DEVICE_BUFFER_FILE;
+      wc->fileptr += k;
+      if (wc->filesize <= 0)
+      {
+        free(wc->file);
+        wc->file = NULL;
+      }
+    }
+    else
+    {
+      writeLog(LOG_NOTICE, "WEB: file upload failed\n");
+      out[0] = MSG_TYPE_FILE;
+      out[1] = 0;
+      out[2] = 1;
+      out[3] = RTTY_FILE_MSG_CANCELED;
+      writeTargetSock(wc, out, 4);
+    }
   }
 
   return 0;
