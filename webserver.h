@@ -21,13 +21,21 @@ typedef struct
 #else
   void *ssl;
 #endif
+  /* web buffer */
   unsigned char * buffer;
+  /* web buffer length */
   unsigned int blen;
 
+  /* receiver offset */
   unsigned int ptr;
+  /* total processed length */
   unsigned int plen;
+  /* processed fragment length */
+  unsigned int flen;
+  /* total payload length */
   unsigned int tlen;
 
+  /* web proxy payload length */
   int stat;
   char filename[256];
   unsigned char * file;

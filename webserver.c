@@ -310,7 +310,7 @@ unsigned int wsBuildBuffer(char *response, unsigned int len, unsigned char *buff
 int processWsMessage(WebContext_t *wc, struct hashmap *context, struct hashmap **shared)
 {
   char *tmp;
-  char out[32];
+  char out[8];
   uint32_t j;
   uint32_t k;
   struct hkey hashkey;
@@ -367,24 +367,11 @@ int processWsMessage(WebContext_t *wc, struct hashmap *context, struct hashmap *
   if (0 == strncmp((char *) wc->buffer, "data:", 5) && wc->session != -1)
   {
     k = strlen((char *) &wc->buffer[5]);
-    if (k > 28)
-    {
-      tmp = (char *) malloc(k + 4);
-      j = 1;
-    }
-    else
-    {
-      tmp = out;
-      j = 0;
-    }
-    tmp[0] = MSG_TYPE_TERMDATA;
-    tmp[1] = 0;
-    tmp[2] = k + 1; /* includes session */
-    tmp[3] = wc->session;
-    memcpy(tmp + 4, wc->buffer + 5, k);
-    k += 4;
-    writeTargetSock(wc, tmp, k);
-    if (j) free(tmp);
+    out[0] = MSG_TYPE_TERMDATA;
+    *(unsigned short *) &out[1] = htons((unsigned short) k + 1);
+    out[3] = wc->session;
+    writeTargetSock(wc, out, 4);
+    writeTargetSock(wc, wc->buffer + 5, k);
   }
   if (0 == strncmp((char *) wc->buffer, "size:", 5) && wc->session != -1)
   {
@@ -431,12 +418,26 @@ int processWsMessage(WebContext_t *wc, struct hashmap *context, struct hashmap *
       }
       else
       {
-        out[2] = 5 + strlen(wc->filename);
-        out[3] = RTTY_FILE_MSG_INFO;
-        *(unsigned int *) &out[4] = htonl((uint32_t) wc->filesize);
-        strcpy(&out[8], wc->filename);
-        wc->fileptr = 0;
-        writeTargetSock(wc, out, out[2] + 3);
+        // check size!
+        tmp = realloc(wc->buffer, wc->filesize * 3);
+        if (tmp)
+        {
+          writeLog(LOG_NOTICE, "WS:  file buffer realloc\n");
+          wc->buffer = (unsigned char *) tmp;
+          wc->blen = wc->filesize * 3;
+          k = strlen(wc->filename);
+          *(unsigned short *) &out[1] = htons((unsigned short) 5 + k);
+          out[3] = RTTY_FILE_MSG_INFO;
+          *(unsigned int *) &out[4] = htonl((uint32_t) wc->filesize);
+          wc->fileptr = 0;
+          writeTargetSock(wc, out, 8);
+          writeTargetSock(wc, wc->filename, k);
+        }
+        else
+        {
+          writeLog(LOG_WARN, "WS:  file buffer cancel mem\n");
+          writeTargetSock(wc, out, 4);
+        }
       }
     }
     else
@@ -525,7 +526,6 @@ int processWsData(WebContext_t *wc, struct hashmap *context, struct hashmap **sh
 
     if (masked)
     {
-      writeLog(LOG_DEBUG, "WS:  masked\n");
       memcpy(mask, &wc->buffer[wc->plen], 4);
       wc->plen += 4;
     }
@@ -533,6 +533,7 @@ int processWsData(WebContext_t *wc, struct hashmap *context, struct hashmap **sh
     if ((wc->ptr - wc->plen) < wsLen)
     {
       writeLog(LOG_DEBUG, "WS:  packet incomplete\n\n");
+      wc->plen = rlen;
       break;
     }
     else
@@ -541,31 +542,34 @@ int processWsData(WebContext_t *wc, struct hashmap *context, struct hashmap **sh
     }
 
     wc->tlen += wsLen;
-    if (fin)
-    {
-      writeLog(LOG_DEBUG, "WS:  fin detected %d\n", wc->tlen);
-    }
-    else
-      writeLog(LOG_DEBUG, "WS:  fragment\n");
     switch (opcode)
     {
-      case 0x00:
       case 0x01:
+        writeLog(LOG_DEBUG, "WS:  new packet\n");
+        wc->flen = 0;
+        // fallthrough
+      case 0x00:
         /* parse ws data */
         if (masked)
         {
-          for (i = 0; i < wsLen; i++, wc->plen++)
+          writeLog(LOG_DEBUG, "WS:  masked\n");
+          for (i = 0; wc->flen < wc->tlen; i++, wc->flen++, wc->plen++)
           {
-            wc->buffer[i] = (char)(wc->buffer[wc->plen] ^ mask[i & 0x3]);
+            wc->buffer[wc->flen] = (char)(wc->buffer[wc->plen] ^ mask[i & 0x3]);
           }
-          wc->buffer[i] = 0;
+          wc->buffer[wc->flen] = 0;
         }
-        writeLog(LOG_DEBUG, "WS:  data packet ptr %d len %d plen %d\n", wc->ptr, wsLen, wc->plen);
+        writeLog(LOG_DEBUG, "WS:  data packet ptr %d len %d plen %d flen %d\n", wc->ptr, wsLen, wc->plen, wc->flen);
         if (fin)
         {
+          writeLog(LOG_DEBUG, "WS:  fin detected %d\n", wc->tlen);
           if (wc->tlen < 4096) writeLog(LOG_DEBUG, "\nWS:  %s\n\n", wc->buffer);
           processWsMessage(wc, context, shared);
           wc->tlen = 0;
+        }
+        else
+        {
+          writeLog(LOG_DEBUG, "WS:  fragment\n");
         }
         break;
       case 0x08:
@@ -594,18 +598,6 @@ int processWsData(WebContext_t *wc, struct hashmap *context, struct hashmap **sh
     }
   } while (wc->plen < wc->ptr);
 
-  if (wc->plen < wc->ptr)
-  {
-    /* revert buffer start */
-    writeLog(LOG_DEBUG, "WS:  revert buffer start %d\n", wc->plen);
-    wc->plen = rlen;
-  }
-  else if (fin)
-  {
-    writeLog(LOG_DEBUG, "WS:  reset buffer ptrs %d %d\n", wc->ptr, wc->plen);
-    wc->ptr = 0;
-    wc->plen = 0;
-  }
   return 0;
 }
 
