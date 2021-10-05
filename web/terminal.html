@@ -13,6 +13,7 @@
         var term = new Terminal();
         var deviceid = "";
         var dnl;
+        var inputtimer = null;
         var reader = new FileReader();
         var upl = document.createElement('input');
 
@@ -25,11 +26,24 @@
           document.body.onfocus = null;
           if (upl.files.length > 0)
           {
+            clearTimeout(inputtimer);
+            inputtimer = null;
             console.log(upl.files[0].name + " " + upl.files[0].size);
             ws.send("fls:" + upl.files[0].name + ";" + upl.files[0].size)
             reader.readAsDataURL(upl.files[0]);
           }
-          else ws.send("flc");
+          else
+          {
+            if (inputtimer === null)
+            {
+              inputtimer = setTimeout(checkSend, 100);
+            }
+            else
+            {
+              inputtimer = null;
+              ws.send("flc");
+            }
+          }
         }
 
         upl.type = "file";
