@@ -79,7 +79,7 @@
             {
               console.log(m.data);
             }
-            if (typeof resp.devices != "undefined")
+            if (typeof resp != "undefined" && typeof resp.devices != "undefined")
             {
               parent.innerText = "";
               for (var i = 0, len = resp.devices.length, para, term, web, s1, s2, s3, s4, s5; i < len; i++)
