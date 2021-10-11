@@ -275,19 +275,19 @@ inline void writeTargetSock(WebContext_t *wc, const void *data, int len)
 #endif
 }
 
-unsigned int wsBuildBuffer(char *response, unsigned int len, unsigned char *buffer)
+unsigned int wsBuildBuffer(unsigned char type, char *response, unsigned int len, unsigned char *buffer)
 {
   unsigned int keyOffset = 0;
 
   if (buffer != NULL)
   {
-    buffer[0] = 0x81; /* fin + text frame */
-    if (len >= 65535)
+    buffer[0] = 0x80 | type; /* fin */
+    if (len >= 65536)
     {
       buffer[1] = 0x7F;
       /* we support only 4B length */
       memset(buffer + 2, 0, 4);
-      *(unsigned int *) &buffer[4] = htonl(len);
+      *(unsigned int *) &buffer[6] = htonl(len);
       keyOffset = 10;
     }
     else if (len >= 126)
@@ -316,15 +316,15 @@ int processWsMessage(WebContext_t *wc, struct hashmap *context, struct hashmap *
   struct hkey hashkey;
   DeviceContext_t *dc;
 
-  if (0 == strncmp((char *) wc->buffer, "list", 4))
+  if (0 == memcmp(wc->buffer, "list", 4))
   {
     wc->index = 1;
     tmp = malloc(sd.deviceslen + 30);
-    k = wsBuildBuffer(sd.devices, sd.deviceslen, (unsigned char *) tmp);
+    k = wsBuildBuffer(0x01, sd.devices, sd.deviceslen, (unsigned char *) tmp);
     writeWebSock(wc, tmp, k);
     free(tmp);
   }
-  if (0 == strncmp((char *) wc->buffer, "init:", 5))
+  else if (0 == memcmp(wc->buffer, "init:", 5))
   {
     hashkey.data = wc->buffer + 5;
     hashkey.length = strlen((char *) &wc->buffer[5]);
@@ -364,7 +364,7 @@ int processWsMessage(WebContext_t *wc, struct hashmap *context, struct hashmap *
       removeDisconnectWeb(wc, context);
     }
   }
-  if (0 == strncmp((char *) wc->buffer, "data:", 5) && wc->session != -1)
+  else if (0 == memcmp(wc->buffer, "data:", 5) && wc->session != -1)
   {
     k = strlen((char *) &wc->buffer[5]);
     out[0] = MSG_TYPE_TERMDATA;
@@ -373,7 +373,7 @@ int processWsMessage(WebContext_t *wc, struct hashmap *context, struct hashmap *
     writeTargetSock(wc, out, 4);
     writeTargetSock(wc, wc->buffer + 5, k);
   }
-  if (0 == strncmp((char *) wc->buffer, "size:", 5) && wc->session != -1)
+  else if (0 == memcmp(wc->buffer, "size:", 5) && wc->session != -1)
   {
     sscanf((char *) &wc->buffer[5], "%hdx%hd", (unsigned short *) &j, (unsigned short *) &k);
     out[0] = MSG_TYPE_WINSIZE;
@@ -384,7 +384,7 @@ int processWsMessage(WebContext_t *wc, struct hashmap *context, struct hashmap *
     *(unsigned short *) &out[6] = htons((unsigned short) k);
     writeTargetSock(wc, out, 8);
   }
-  if (0 == strncmp((char *) wc->buffer, "flc", 3) && wc->session != -1)
+  else if (0 == memcmp(wc->buffer, "flc", 3) && wc->session != -1)
   {
     writeLog(LOG_NOTICE, "WEB: file cancel ws\n");
     out[0] = MSG_TYPE_FILE;
@@ -399,7 +399,7 @@ int processWsMessage(WebContext_t *wc, struct hashmap *context, struct hashmap *
       wc->filesize = 0;
     }
   }
-  if (0 == strncmp((char *) wc->buffer, "fls:", 4) && wc->session != -1)
+  else if (0 == memcmp(wc->buffer, "fls:", 4) && wc->session != -1)
   {
     writeLog(LOG_DEBUG, "WEB: file start ack\n");
     out[0] = MSG_TYPE_FILE;
@@ -446,7 +446,7 @@ int processWsMessage(WebContext_t *wc, struct hashmap *context, struct hashmap *
       writeTargetSock(wc, out, 4);
     }
   }
-  if (0 == strncmp((char *) wc->buffer, "flu:", 4) && wc)
+  else if (0 == memcmp(wc->buffer, "flu:", 4) && wc)
   {
     writeLog(LOG_DEBUG, "WS:  file upload\n");
     if (wc->file)
@@ -485,8 +485,10 @@ int processWsMessage(WebContext_t *wc, struct hashmap *context, struct hashmap *
 
 int processWsData(WebContext_t *wc, struct hashmap *context, struct hashmap **shared)
 {
+  int ret = 0;
   uint32_t i;
   unsigned char fin;
+  unsigned char rsvd;
   unsigned char opcode;
   unsigned char masked;
   uint32_t wsLen;
@@ -494,10 +496,12 @@ int processWsData(WebContext_t *wc, struct hashmap *context, struct hashmap **sh
   unsigned char mask[4];
 
   writeLog(LOG_DEBUG, "WS:  packet ptr %d, plen %d\n", wc->ptr, wc->plen);
-  do {
+  while ((wc->ptr - wc->plen) >= 2 && 0 == ret)
+  {
     /* backup processed length */
     rlen = wc->plen;
     fin = wc->buffer[wc->plen] & 0x80;
+    rsvd = wc->buffer[wc->plen] & 0x70;
     opcode = wc->buffer[wc->plen] & 0x0f;
     wsLen = (wc->buffer[wc->plen + 1] & 0x7f);
     masked = (wc->buffer[wc->plen + 1] & 0x80);
@@ -524,7 +528,7 @@ int processWsData(WebContext_t *wc, struct hashmap *context, struct hashmap **sh
       wc->plen += 8;
     }
 
-    if (masked)
+    if ((wc->ptr - wc->plen) >= 4 && masked)
     {
       memcpy(mask, &wc->buffer[wc->plen], 4);
       wc->plen += 4;
@@ -545,7 +549,38 @@ int processWsData(WebContext_t *wc, struct hashmap *context, struct hashmap **sh
     switch (opcode)
     {
       case 0x01:
+      case 0x02:
+      case 0x09:
         writeLog(LOG_DEBUG, "WS:  new packet\n");
+        if (opcode == 0x09)
+        {
+          wc->type = 0x0A;
+          if (wsLen > 125)
+          {
+            writeLog(LOG_WARN, "WS:  invalid control length\n");
+            wc->buffer[0] = 0x88;
+            wc->buffer[1] = 0x02;
+            wc->buffer[2] = 0x03;
+            wc->buffer[3] = 0xEA;
+            wc->plen += wsLen;
+            ret = 1;
+            writeWebSock(wc, wc->buffer, 4);
+            continue;
+          }
+        }
+        else wc->type = opcode;
+        if (rsvd)
+        {
+          writeLog(LOG_WARN, "WS:  invalid control rsvd\n");
+          wc->buffer[0] = 0x88;
+          wc->buffer[1] = 0x02;
+          wc->buffer[2] = 0x03;
+          wc->buffer[3] = 0xEA;
+          wc->plen += wsLen;
+          ret = 1;
+          writeWebSock(wc, wc->buffer, 4);
+          continue;
+        }
         wc->flen = 0;
         // fallthrough
       case 0x00:
@@ -564,7 +599,19 @@ int processWsData(WebContext_t *wc, struct hashmap *context, struct hashmap **sh
         {
           writeLog(LOG_DEBUG, "WS:  fin detected %d\n", wc->tlen);
           if (wc->tlen < 4096) writeLog(LOG_DEBUG, "\nWS:  %s\n\n", wc->buffer);
+#ifdef WS_TEST
+          wc->file = malloc(wc->tlen + 32);
+          if (wc->file)
+          {
+            rlen = wsBuildBuffer(wc->type, (char *) wc->buffer, wc->tlen, wc->file);
+            writeWebSock(wc, wc->file, rlen);
+            free(wc->file);
+            wc->file = NULL;
+          }
+          writeLog(LOG_DEBUG, "WS:  packet processed\n");
+#else
           processWsMessage(wc, context, shared);
+#endif
           wc->tlen = 0;
         }
         else
@@ -573,32 +620,36 @@ int processWsData(WebContext_t *wc, struct hashmap *context, struct hashmap **sh
         }
         break;
       case 0x08:
-        writeLog(LOG_DEBUG, "WS:  close packet\n");
-        wc->plen += wsLen + 2;
+        writeLog(LOG_DEBUG, "WS:  close packet %d\n", wsLen);
+        for (i = 0; i < wsLen; i++) printf("%02x", wc->buffer[wc->plen + i] ^ mask[i & 0x3]);
+        printf("\n");
+        wc->plen += wsLen;
         wc->buffer[0] = 0x88;
         wc->buffer[1] = 0x00;
-        rlen = 2;
+        wc->buffer[2] = 0x03;
+        wc->buffer[3] = 0xE8;
+        writeWebSock(wc, wc->buffer, 4);
+        ret = 1;
         break;
-      case 0x09:
-        writeLog(LOG_DEBUG, "WS:  ping packet\n");
-        wc->plen += wsLen + 2;
-        /* set pong */
-        wc->buffer[0] &= 0xF0;
-        wc->buffer[0] |= 0x0A;
-        rlen = 2;
+      case 0x0A:
+        writeLog(LOG_DEBUG, "WS:  pong\n");
+        wc->plen += wsLen;
+        wc->tlen = 0;
         break;
       default:
-        writeLog(LOG_DEBUG, "WS:  unkown packet %d\n", wc->buffer[wc->plen] & 0x0f);
-        wc->plen = wc->ptr + 1;
+        writeLog(LOG_DEBUG, "WS:  unkown packet %d (%d)\n", opcode, wsLen);
+        wc->buffer[0] = 0x88;
+        wc->buffer[1] = 0x02;
+        wc->buffer[2] = 0x03;
+        wc->buffer[3] = 0xEA;
+        wc->plen += wsLen;
+        ret = 1;
+        writeWebSock(wc, wc->buffer, 4);
         break;
     }
-    if (rlen)
-    {
-      writeWebSock(wc, wc->buffer, rlen);
-    }
-  } while (wc->plen < wc->ptr);
+  }
 
-  return 0;
+  return ret;
 }
 
 void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **shared)
@@ -674,7 +725,9 @@ void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **s
               }
             }
           }
-
+#ifdef WS_TEST
+          if (1)
+#else
           tmp = strstr((char *) wc->buffer, "Authorization: Basic");
           if (tmp != NULL)
           {
@@ -686,6 +739,7 @@ void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **s
             hashkey.data = sd.auth;
           }
           if (hashmap_get(shared[2], &hashkey) != NULL)
+#endif
           {
             tmp = (char *) wc->buffer;
             if (strstr(tmp, "GET / ") != NULL)
@@ -725,7 +779,11 @@ void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **s
         }
         else
         {
-          processWsData(wc, context, shared);
+          if (processWsData(wc, context, shared))
+          {
+            writeLog(LOG_WARN, "WS:  disconnect requested\n");
+            removeDisconnectWeb(wc, context);
+          }
         }
       }
       else if (errno == EAGAIN || errno == EWOULDBLOCK)
@@ -771,7 +829,7 @@ void createList(struct hashmap **shared)
   data = (unsigned char *) malloc(sd.deviceslen + 14);
   if (data)
   {
-    len = wsBuildBuffer(sd.devices, sd.deviceslen, data);
+    len = wsBuildBuffer(0x01, sd.devices, sd.deviceslen, data);
     entries = hashmap_iterator(shared[1]);
     while (entries->next(entries))
     {

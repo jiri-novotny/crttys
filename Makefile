@@ -29,5 +29,12 @@ fullssl: web
 debugssl: web
 	$(CROSS_COMPILE)$(CC) -DENABLE_SSL=1 -DENABLE_WEB_SSL=1 -DLOGLEVEL=5 -g $(SRCS) -Wall -Wextra -o $(NAME) $(LDFLAGS)
 
+test: web
+	$(CROSS_COMPILE)$(CC) -DENABLE_SSL=0 -DLOGLEVEL=5 -DWS_TEST=1 -g $(SRCS) -Wall -Wextra -o $(NAME) $(LDFLAGS)
+
 clean:
 	rm -rf hexgen index.c terminal.c crttys
+
+
+run: webssl
+	./crttys -k key.pem -c cert.pem -K web/privkey.pem -C web/chain.pem -d 65001 -w 4433

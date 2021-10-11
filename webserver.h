@@ -35,6 +35,8 @@ typedef struct
   /* total payload length */
   unsigned int tlen;
 
+  unsigned char type;
+
   /* web proxy payload length */
   int stat;
   char filename[256];
