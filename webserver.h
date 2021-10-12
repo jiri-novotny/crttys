@@ -50,8 +50,8 @@ int initWeb(void);
 void acceptWeb(int clientSock, SSL_CTX *sslCtx, struct hashmap *context);
 void disconnectWeb(WebContext_t *wc);
 void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **shared);
-void writeWebSock(WebContext_t *wc, const void* data, int len);
-void writeTargetSock(WebContext_t *wc, const void* data, int len);
+ssize_t writeWebSock(WebContext_t *wc, const void* data, unsigned int len);
+ssize_t writeTargetSock(WebContext_t *wc, const void* data, unsigned int len);
 void createList(struct hashmap **shared);
 void cleanupWeb(struct hashmap *context);
 
