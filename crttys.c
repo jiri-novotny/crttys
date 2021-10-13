@@ -355,8 +355,6 @@ int main(int argc, char **argv)
   }
 #endif
 
-  initWeb();
-
   memset(&epollServer, 0, sizeof(struct epoll_event));
 
   epollFd = epoll_create1(0);
@@ -372,6 +370,7 @@ int main(int argc, char **argv)
   shared[1] = websocks;
   shared[2] = webauth;
 
+  initWeb(shared);
   memset(epollInput, 0, sizeof(epollInput));
   run = 1;
   while (run)
@@ -408,7 +407,7 @@ int main(int argc, char **argv)
             wc = (WebContext_t *) hashmap_get(websocks, &hashkey);
             if (wc)
             {
-              handleWebData(wc, websocks, shared);
+              handleWebData(wc, shared);
             }
             else
             {

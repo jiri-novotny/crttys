@@ -1,5 +1,5 @@
-#ifndef WEBSOCKET_H
-#define WEBSOCKET_H
+#ifndef WEBSERVER_H
+#define WEBSERVER_H
 
 #include <openssl/ssl.h>
 
@@ -46,13 +46,13 @@ typedef struct
   unsigned char filehold[3];
 } WebContext_t;
 
-int initWeb(void);
+int initWeb(struct hashmap **shared);
 void acceptWeb(int clientSock, SSL_CTX *sslCtx, struct hashmap *context);
 void disconnectWeb(WebContext_t *wc);
-void handleWebData(WebContext_t *wc, struct hashmap *context, struct hashmap **shared);
+void removeDisconnectWeb(WebContext_t *wc, struct hashmap *context);
+void handleWebData(WebContext_t *wc, struct hashmap **shared);
 ssize_t writeWebSock(WebContext_t *wc, const void* data, unsigned int len);
 ssize_t writeTargetSock(WebContext_t *wc, const void* data, unsigned int len);
-void createList(struct hashmap **shared);
 void cleanupWeb(struct hashmap *context);
 
 #endif

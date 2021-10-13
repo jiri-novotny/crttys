@@ -1,6 +1,6 @@
 NAME = crttys
 LDFLAGS = -lssl -lcrypto
-SRCS = crttys.c config.c net.c log.c device.c webserver.c hashmap.c iterator.c index.c terminal.c
+SRCS = crttys.c config.c net.c log.c device.c webserver.c websocket.c hashmap.c iterator.c index.c terminal.c
 
 all: fullssl
 
