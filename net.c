@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 
 #include "net.h"
+#include "log.h"
 
 int setSocketFlags(int sock, int f)
 {
@@ -83,7 +84,7 @@ int acceptSocket(int remoteSock, int epollFd)
   int clientSock;
   struct epoll_event epollClient;
 
-  clientAddrLength = sizeof(socklen_t);
+  clientAddrLength = sizeof(struct sockaddr_in);
   clientSock = accept(remoteSock, (struct sockaddr *) &clientAddr, &clientAddrLength);
   if (clientSock == -1)
   {
@@ -102,6 +103,11 @@ int acceptSocket(int remoteSock, int epollFd)
         close(clientSock);
         clientSock = -1;
       }
+      else writeLog(LOG_NOTICE, "NET: %d connected from %d.%d.%d.%d\n", clientSock,
+                    clientAddr.sin_addr.s_addr & 0xff,
+                    (clientAddr.sin_addr.s_addr & 0xff00) >> 8,
+                    (clientAddr.sin_addr.s_addr & 0xff0000) >> 16,
+                    (clientAddr.sin_addr.s_addr & 0xff000000) >> 24);
     }
     else
     { 
