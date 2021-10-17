@@ -34,7 +34,7 @@ int configParse(char *path, struct hashmap *users)
   unsigned char *tmp;
   jsmn_parser jp;
   jsmntok_t tok[128];
-  User_t *u;
+  User_t *u = NULL;
   struct hkey hashkey;
 
   fdConf = fopen(path, "r");
@@ -46,7 +46,10 @@ int configParse(char *path, struct hashmap *users)
     config = (char *) malloc(len);
     if (config)
     {
-      fread(config, 1, len, fdConf);
+      if (fread(config, 1, len, fdConf) != len)
+      {
+        writeLog(LOG_WARN, "CFG: Reading file failed\n");
+      }
       fclose(fdConf);
     }
     else
@@ -80,35 +83,41 @@ int configParse(char *path, struct hashmap *users)
     else if (jsoneq(config, &tok[i], "name") == 0)
     {
       i++;
-      u->name = strndup(config + tok[i].start, tok[i].end - tok[i].start);
-      if (u->key)
+      if (u)
       {
-        hashkey.data = u->key;
-        hashkey.length = strlen(u->key);
-        if (hashmap_set(users, &hashkey, u->name) != NULL)
+        u->name = strndup(config + tok[i].start, tok[i].end - tok[i].start);
+        if (u->key)
         {
-          writeLog(LOG_WARN, "CFG: Adding user %s failed\n", u->name);
-          free(u->name);
+          hashkey.data = u->key;
+          hashkey.length = strlen(u->key);
+          if (hashmap_set(users, &hashkey, u->name) != NULL)
+          {
+            writeLog(LOG_WARN, "CFG: Adding user %s failed\n", u->name);
+            free(u->name);
+          }
+          free(u->key);
+          free(u);
         }
-        free(u->key);
-        free(u);
       }
     }
     else if (jsoneq(config, &tok[i], "key") == 0)
     {
       i++;
-      u->key = strndup(config + tok[i].start, tok[i].end - tok[i].start);
-      if (u->name)
+      if (u)
       {
-        hashkey.data = u->key;
-        hashkey.length = strlen(u->key);
-        if (hashmap_set(users, &hashkey, u->name) != NULL)
+        u->key = strndup(config + tok[i].start, tok[i].end - tok[i].start);
+        if (u->name)
         {
-          writeLog(LOG_WARN, "CFG: Adding user %s failed\n", u->name);
-          free(u->name);
+          hashkey.data = u->key;
+          hashkey.length = strlen(u->key);
+          if (hashmap_set(users, &hashkey, u->name) != NULL)
+          {
+            writeLog(LOG_WARN, "CFG: Adding user %s failed\n", u->name);
+            free(u->name);
+          }
+          free(u->key);
+          free(u);
         }
-        free(u->key);
-        free(u);
       }
     }
     else if (jsoneq(config, &tok[i], "users") == 0)
