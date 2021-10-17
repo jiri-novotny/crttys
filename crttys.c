@@ -24,6 +24,7 @@
 #include "iterator.h"
 
 static int run;
+static int epollFd;
 static struct hashmap *devices;
 static char devverifypath[256];
 static char devsslprefix[256];
@@ -64,6 +65,16 @@ void cleanupAuth(struct hashmap *context)
   }
   entries->destroy(entries);
   hashmap_destroy(context);
+}
+
+void modifySock(int sock, int rw)
+{
+  struct epoll_event epollServer;
+
+  epollServer.data.fd = sock;
+  if (0 == rw) epollServer.events = EPOLLIN;
+  else epollServer.events = EPOLLIN | EPOLLOUT;
+  epoll_ctl(epollFd, EPOLL_CTL_MOD, sock, &epollServer);
 }
 
 #define DEV_SSL_PREFIX "LEMEL-"
@@ -131,7 +142,6 @@ int SSLVerifyCallback(int preverify_ok, X509_STORE_CTX *x509_ctx)
 
 int main(int argc, char **argv)
 {
-  int epollFd;
   int deviceSock;
   int wsSock;
   int clientSock;
@@ -144,12 +154,13 @@ int main(int argc, char **argv)
   unsigned short port = 4433;
   unsigned short wsport = 8080;
   char basicauth[256] = "YWRtaW46QURNSU4=";
-  char devcert[256];
-  char devkey[256];
+  char devcert[256] = {0};
+  char devkey[256] = {0};
   char webcert[256];
   char webkey[256];
   char webverifypath[256];
   char *tmp;
+  char auth = 0;
   char useAuthFile = 0;
   
 	struct epoll_event epollServer;
@@ -172,9 +183,11 @@ int main(int argc, char **argv)
     switch (i)
     {
       case 'a':
+        auth = 1;
         strncpy(basicauth, optarg, 255);
         break;
       case 'A':
+        auth = 1;
         useAuthFile = 1;
         strncpy(basicauth, optarg, 255);
         break;
@@ -315,13 +328,13 @@ int main(int argc, char **argv)
       close(wsSock);
       return 7;
     }
+    SSL_CTX_set_cipher_list(deviceSslCtx, "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-RSA-AES128-GCM-SHA256");
   }
-  if (devverifypath[0] != 0)
+  if (deviceSslCtx && devverifypath[0] != 0)
   {
     SSL_CTX_load_verify_locations(deviceSslCtx, NULL, devverifypath);
     SSL_CTX_set_verify(deviceSslCtx, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, SSLVerifyCallback);
   }
-  SSL_CTX_set_cipher_list(deviceSslCtx, "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-RSA-AES128-GCM-SHA256");
 #endif
 
 #if ENABLE_WEB_SSL
@@ -370,7 +383,7 @@ int main(int argc, char **argv)
   shared[1] = websocks;
   shared[2] = webauth;
 
-  initWeb(shared);
+  initWeb(auth, shared);
   memset(epollInput, 0, sizeof(epollInput));
   run = 1;
   while (run)
@@ -407,7 +420,20 @@ int main(int argc, char **argv)
             wc = (WebContext_t *) hashmap_get(websocks, &hashkey);
             if (wc)
             {
-              handleWebData(wc, shared);
+              if (epollInput[i].events & EPOLLIN) handleWebData(wc, shared);
+              if (epollInput[i].events & EPOLLOUT)
+              {
+                ssize_t x = writeWebSock(wc, wc->sbuf + wc->sptr, ((wc->sblen - wc->sptr) < WEB_WRITE_CHUNK) ? (wc->sblen - wc->sptr) : WEB_WRITE_CHUNK);
+                if (x > 0) wc->sptr += x;
+                if (0 == x)
+                {
+                  modifySock(wc->sock, 0);
+                }
+                if (x < 0 && errno != EWOULDBLOCK)
+                {
+                  perror("WS:  ?");
+                }
+              }
             }
             else
             {

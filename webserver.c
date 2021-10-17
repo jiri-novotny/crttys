@@ -19,6 +19,7 @@ extern int webTerminalLen;
 
 typedef struct
 {
+  char requireAuth;
   char auth[512];
   char referer[256];
 } ServerData_t;
@@ -146,8 +147,9 @@ static void parseWebReqReferer(WebContext_t *wc, struct hashmap **shared, char *
   }
 }
 
-int initWeb(struct hashmap **shared)
+int initWeb(char auth, struct hashmap **shared)
 {
+  sd.requireAuth = auth;
   sd.referer[0] = 0;
   createList(shared);
 
@@ -162,9 +164,9 @@ void acceptWeb(int clientSock, SSL_CTX *sslCtx, struct hashmap *context)
   wc = (WebContext_t *) calloc(1, sizeof(WebContext_t));
   if (wc)
   {
-    wc->blen = 4096;
-    wc->buffer = (unsigned char *) malloc(wc->blen);
-    if (wc->buffer)
+    wc->rblen = 4096;
+    wc->rbuf = (unsigned char *) malloc(wc->rblen);
+    if (wc->rbuf)
     {
       wc->sock = clientSock;
       wc->session = -1;
@@ -208,7 +210,7 @@ void disconnectWeb(WebContext_t *wc)
   if (wc->init) writeLog(LOG_INFO, "WS:  fd %d closing\n", wc->sock);
   else writeLog(LOG_INFO, "WEB: fd %d closing\n", wc->sock);
   close(wc->sock);
-  free(wc->buffer);
+  free(wc->rbuf);
   free(wc);
 }
 
@@ -222,7 +224,6 @@ void removeDisconnectWeb(WebContext_t *wc, struct hashmap *context)
   disconnectWeb(wc);
 }
 
-
 void handleWebData(WebContext_t *wc, struct hashmap **shared)
 {
   int ret;
@@ -235,21 +236,21 @@ void handleWebData(WebContext_t *wc, struct hashmap **shared)
   do
   {
 #if ENABLE_WEB_SSL
-    ret = SSL_read(wc->ssl, wc->buffer + wc->ptr, wc->blen - wc->ptr);
+    ret = SSL_read(wc->ssl, wc->rbuf + wc->ptr, wc->rblen - wc->ptr);
 #else
-    ret = read(wc->sock, wc->buffer + wc->ptr, wc->blen - wc->ptr);
+    ret = read(wc->sock, wc->rbuf + wc->ptr, wc->rblen - wc->ptr);
 #endif
     if (ret > 0)
     {
       wc->ptr += ret;
-      if (wc->ptr > (wc->blen / 2))
+      if (wc->ptr > (wc->rblen / 2))
       {
-        tmp = realloc(wc->buffer, wc->blen * 2);
+        tmp = realloc(wc->rbuf, wc->rblen * 2);
         if (tmp)
         {
           writeLog(LOG_DEBUG, "WEB: buffer realloc ok\n");
-          wc->buffer = (unsigned char *) tmp;
-          wc->blen *= 2;
+          wc->rbuf = (unsigned char *) tmp;
+          wc->rblen *= 2;
         }
         else
         {
@@ -263,11 +264,11 @@ void handleWebData(WebContext_t *wc, struct hashmap **shared)
       if (wc->session != -1)
       {
         writeLog(LOG_DEBUG, "WEB: session logout\n");
-        wc->buffer[0] = MSG_TYPE_LOGOUT;
-        wc->buffer[1] = 0;
-        wc->buffer[2] = 1;
-        wc->buffer[3] = wc->session;
-        writeTargetSock(wc, wc->buffer, 4);
+        wc->rbuf[0] = MSG_TYPE_LOGOUT;
+        wc->rbuf[1] = 0;
+        wc->rbuf[2] = 1;
+        wc->rbuf[3] = wc->session;
+        writeTargetSock(wc, wc->rbuf, 4);
       }
       removeDisconnectWeb(wc, shared[1]);
     }
@@ -277,12 +278,12 @@ void handleWebData(WebContext_t *wc, struct hashmap **shared)
       {
         if (0 == wc->init)
         {
-          wc->buffer[wc->ptr] = 0;
+          wc->rbuf[wc->ptr] = 0;
 
           if (sd.referer[0] == 0)
           {
             /* replace with custom header? eg. X-Device */
-            tmp = strstr((char *) wc->buffer, "Referer: ");
+            tmp = strstr((char *) wc->rbuf, "Referer: ");
             if (tmp)
             {
               tmpeol = strchr(tmp + 18, '/');
@@ -296,23 +297,32 @@ void handleWebData(WebContext_t *wc, struct hashmap **shared)
               }
             }
           }
-#ifdef WS_TEST
-          if (1)
-#else
-          tmp = strstr((char *) wc->buffer, "Authorization: Basic");
-          if (tmp != NULL)
+          if (sd.requireAuth)
           {
-            j = strchr(tmp + 21, '\n') - &tmp[21];
-            memcpy(sd.auth, tmp + 21, j);
-            if (sd.auth[j - 1] == '\r') j--;
-            sd.auth[j] = 0;
-            hashkey.length = j;
-            hashkey.data = sd.auth;
+            tmp = strstr((char *) wc->rbuf, "Authorization: Basic");
+            if (tmp != NULL)
+            {
+              j = strchr(tmp + 21, '\n') - &tmp[21];
+              memcpy(sd.auth, tmp + 21, j);
+              if (sd.auth[j - 1] == '\r') j--;
+              sd.auth[j] = 0;
+              hashkey.length = j;
+              hashkey.data = sd.auth;
+            }
+            if (hashmap_get(shared[2], &hashkey) != NULL)
+            {
+              k = 1;
+            }
+            else
+            {
+              k = 0;
+            }
           }
-          if (hashmap_get(shared[2], &hashkey) != NULL)
-#endif
+          else k = 1;
+
+          if (k)
           {
-            tmp = (char *) wc->buffer;
+            tmp = (char *) wc->rbuf;
             if (strstr(tmp, "GET / ") != NULL)
             {
               writeLog(LOG_DEBUG, "WEB: index\n");
@@ -321,11 +331,11 @@ void handleWebData(WebContext_t *wc, struct hashmap **shared)
             else if (strstr(tmp, "GET /ws ") != NULL)
             {
               writeLog(LOG_DEBUG, "WEB: websocket\n");
-              j = wsUpgrade((char *) wc->buffer);
+              j = wsUpgrade((char *) wc->rbuf);
               if (j)
               {
                 wc->init = 1;
-                writeWebSock(wc, wc->buffer, j);
+                writeWebSock(wc, wc->rbuf, j);
               }
             }
             else if (strstr(tmp, "GET /favicon.ico ") != NULL)
@@ -334,11 +344,11 @@ void handleWebData(WebContext_t *wc, struct hashmap **shared)
             }
             else if (strstr(tmp, sd.referer) == NULL)
             {
-              parseWebReqReferer(wc, shared, (char *) wc->buffer, wc->ptr);
+              parseWebReqReferer(wc, shared, (char *) wc->rbuf, wc->ptr);
             }
             else
             {
-              parseWebReqUrl(wc, shared, (char *) wc->buffer, wc->ptr);
+              parseWebReqUrl(wc, shared, (char *) wc->rbuf, wc->ptr);
             }
           }
           else

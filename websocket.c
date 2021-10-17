@@ -10,6 +10,8 @@
 
 #define SWITCH_PROTO      "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: "
 
+extern void modifySock(int sock, int rw);
+
 static char devices[2048];
 static int dlen;
 
@@ -99,6 +101,7 @@ void wsSendBuffer(WebContext_t *wc, unsigned char type, unsigned char *response,
 {
   unsigned char buffer[12];
   unsigned int keyOffset = 0;
+  ssize_t c;
 
   buffer[0] = 0x80 | type; /* fin */
   if (len >= 65536)
@@ -120,16 +123,19 @@ void wsSendBuffer(WebContext_t *wc, unsigned char type, unsigned char *response,
     buffer[1] = len & 0xFF;
     keyOffset = 2;
   }
-  writeWebSock(wc, buffer, keyOffset);
-  const unsigned int S = 4096*16;
-  ssize_t a;
-  for (unsigned int i = 0; i < len;)
+  c = writeWebSock(wc, buffer, keyOffset);
+  writeLog(LOG_DEBUG, "WS:  write response\n");
+  for (wc->sptr = 0, wc->sbuf = response, wc->sblen = len; wc->sptr < len && c > 0;)
   {
-    /* FIXME: block or EPOLLOUT */
-    a = writeWebSock(wc, response + i, ((len - i) < S) ? (len - i) : S);
-    if (a > 0) i += a;
-    else usleep(3000);
+    c = writeWebSock(wc, wc->sbuf + wc->sptr, ((wc->sblen - wc->sptr) < WEB_WRITE_CHUNK) ? (wc->sblen - wc->sptr) : WEB_WRITE_CHUNK);
+    if (c > 0) wc->sptr += c;
+    else if (c == -1 && errno == EWOULDBLOCK)
+    {
+      writeLog(LOG_DEBUG, "WS:  enable epoll write\n");
+      modifySock(wc->sock, 1);
+    }
   }
+  writeLog(LOG_DEBUG, "WS:  write response done %d\n", c);
 }
 
 static void wsSendClose(WebContext_t *wc, unsigned short reason)
@@ -260,7 +266,7 @@ int processWsMessage(WebContext_t *wc, struct hashmap **shared, unsigned char ty
         {
           writeLog(LOG_NOTICE, "WS:  file buffer realloc\n");
           input = (unsigned char *) tmp;
-          wc->blen = wc->filesize * 3;
+          wc->rblen = wc->filesize * 3;
           k = strlen(wc->filename);
           *(unsigned short *) &out[1] = htons((unsigned short) 5 + k);
           out[3] = RTTY_FILE_MSG_INFO;
@@ -301,6 +307,7 @@ int processWsMessage(WebContext_t *wc, struct hashmap **shared, unsigned char ty
       wc->fileptr += k;
       if (wc->filesize <= 0)
       {
+        /* FIXME */
         free(wc->file);
         wc->file = NULL;
       }
@@ -336,21 +343,21 @@ int processWsData(WebContext_t *wc, struct hashmap **shared)
   {
     /* backup processed length */
     rlen = wc->plen;
-    fin = wc->buffer[wc->plen] & 0x80;
-    rsvd = wc->buffer[wc->plen] & 0x70;
-    opcode = wc->buffer[wc->plen] & 0x0f;
-    wsLen = (wc->buffer[wc->plen + 1] & 0x7f);
-    masked = (wc->buffer[wc->plen + 1] & 0x80);
+    fin = wc->rbuf[wc->plen] & 0x80;
+    rsvd = wc->rbuf[wc->plen] & 0x70;
+    opcode = wc->rbuf[wc->plen] & 0x0f;
+    wsLen = (wc->rbuf[wc->plen + 1] & 0x7f);
+    masked = (wc->rbuf[wc->plen + 1] & 0x80);
     wc->plen += 2;
     if (wsLen == 126)
     {
-      memcpy((void *) &wsLen, wc->buffer + wc->plen, 2);
+      memcpy((void *) &wsLen, wc->rbuf + wc->plen, 2);
       wsLen = htons(wsLen);
       wc->plen += 2;
     }
     else if (wsLen == 127)
     {
-      memcpy((void *) &wsLen, wc->buffer + wc->plen, 4);
+      memcpy((void *) &wsLen, wc->rbuf + wc->plen, 4);
       if (wsLen > 0)
       {
         writeLog(LOG_DEBUG, "WS:  Unsupported length\n");
@@ -360,7 +367,7 @@ int processWsData(WebContext_t *wc, struct hashmap **shared)
       }
       else
       {
-        memcpy((void *) &wsLen, wc->buffer + wc->plen + 4, 4);
+        memcpy((void *) &wsLen, wc->rbuf + wc->plen + 4, 4);
         wsLen = htonl(wsLen);
       }
       wc->plen += 8;
@@ -368,7 +375,7 @@ int processWsData(WebContext_t *wc, struct hashmap **shared)
 
     if ((wc->ptr - wc->plen) >= 4 && masked)
     {
-      memcpy(mask, &wc->buffer[wc->plen], 4);
+      memcpy(mask, &wc->rbuf[wc->plen], 4);
       wc->plen += 4;
     }
 
@@ -429,29 +436,35 @@ int processWsData(WebContext_t *wc, struct hashmap **shared)
           writeLog(LOG_DEBUG, "WS:  masked\n");
           for (i = 0; wc->flen < wc->tlen; i++, wc->flen++, wc->plen++)
           {
-            wc->buffer[wc->flen] = (char)(wc->buffer[wc->plen] ^ mask[i & 0x3]);
+            wc->rbuf[wc->flen] = (char)(wc->rbuf[wc->plen] ^ mask[i & 0x3]);
           }
-          wc->buffer[wc->flen] = 0;
+          wc->rbuf[wc->flen] = 0;
         }
         writeLog(LOG_DEBUG, "WS:  data packet ptr %d len %d plen %d flen %d\n", wc->ptr, wsLen, wc->plen, wc->flen);
         if (fin)
         {
           writeLog(LOG_DEBUG, "WS:  fin detected %d\n", wc->tlen);
-          if (wc->tlen < 4096) writeLog(LOG_DEBUG, "\nWS:  %s\n\n", wc->buffer);
+          if (wc->tlen < 4096) writeLog(LOG_DEBUG, "\nWS:  %s\n\n", wc->rbuf);
 
           if (rlen)
           {
-            processWsMessage(wc, shared, opcode, wc->buffer + rlen, wc->flen - rlen);
+            processWsMessage(wc, shared, opcode, wc->rbuf + rlen, wc->flen - rlen);
             wc->flen = rlen;
             wc->tlen -= wsLen;
             rlen = 0;
           }
           else
           {
-            processWsMessage(wc, shared, wc->type, wc->buffer, wc->tlen);
+            processWsMessage(wc, shared, wc->type, wc->rbuf, wc->tlen);
             wc->type = 0;
             wc->tlen = 0;
             wc->flen = 0;
+            if ((wc->ptr - wc->plen) == 0)
+            {
+              wc->ptr = wc->plen = 0;
+              writeLog(LOG_DEBUG, "WS:  reset buffer\n");
+              // FIXME: realloc?
+            }
           }
           writeLog(LOG_DEBUG, "WS:  packet processed\n");
         }
@@ -465,9 +478,9 @@ int processWsData(WebContext_t *wc, struct hashmap **shared)
         if (wsLen == 0) wsSendClose(wc, 1000);
         else
         {
-          wc->buffer[0] = (char)(wc->buffer[wc->plen++] ^ mask[0]);
-          wc->buffer[1] = (char)(wc->buffer[wc->plen] ^ mask[1]);
-          rlen = (int) ntohs(*(unsigned short *) &wc->buffer[0]);
+          wc->rbuf[0] = (char)(wc->rbuf[wc->plen++] ^ mask[0]);
+          wc->rbuf[1] = (char)(wc->rbuf[wc->plen] ^ mask[1]);
+          rlen = (int) ntohs(*(unsigned short *) &wc->rbuf[0]);
           if ((rlen >= 1000 && rlen < 1004) || (rlen >= 1007 && rlen < 1012) || (rlen >= 3000 && rlen < 5000))
           {
             wsSendClose(wc, 1000);
@@ -520,6 +533,8 @@ void createList(struct hashmap **shared)
   strcat(devices, "]}");
   dlen += 2;
   entries->destroy(entries);
+
+  writeLog(LOG_DEBUG, "%s\n", devices);
 
   data = (unsigned char *) malloc(dlen + 12);
   if (data)

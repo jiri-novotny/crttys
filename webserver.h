@@ -5,6 +5,8 @@
 
 #include "hashmap.h"
 
+#define WEB_WRITE_CHUNK       4096
+
 typedef struct
 {
   int sock;
@@ -21,10 +23,15 @@ typedef struct
 #else
   void *ssl;
 #endif
-  /* web buffer */
-  unsigned char * buffer;
-  /* web buffer length */
-  unsigned int blen;
+  /* web recv buffer */
+  unsigned char *rbuf;
+  /* web recv buffer length */
+  unsigned int rblen;
+  /* web send buffer */
+  unsigned char *sbuf;
+  /* web send buffer length */
+  unsigned int sblen;
+  unsigned int sptr;
 
   /* receiver offset */
   unsigned int ptr;
@@ -46,7 +53,7 @@ typedef struct
   unsigned char filehold[3];
 } WebContext_t;
 
-int initWeb(struct hashmap **shared);
+int initWeb(char auth, struct hashmap **shared);
 void acceptWeb(int clientSock, SSL_CTX *sslCtx, struct hashmap *context);
 void disconnectWeb(WebContext_t *wc);
 void removeDisconnectWeb(WebContext_t *wc, struct hashmap *context);

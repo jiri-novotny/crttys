@@ -6,9 +6,8 @@
 
 #include "device.h"
 #include "webserver.h"
+#include "websocket.h"
 #include "log.h"
-
-extern unsigned int wsBuildBuffer(char *response, unsigned int len, unsigned char *buffer);
 
 static void removeDisconnectDevice(DeviceContext_t *dc, struct hashmap *context)
 {
@@ -157,12 +156,16 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
         if (session >= 0)
         {
           memcpy(tmp, "cns:", 4);
-          rlen = wsBuildBuffer((char *) tmp, len + 3, out);
+          rlen = wsBuildBuffer(0x01, (char *) tmp, len + 3, out);
 #if ENABLE_WEB_SSL
-          SSL_write(dc->sessions[session], out, rlen);
+          rlen = SSL_write(dc->sessions[session], out, rlen);
 #else
-          write(dc->sessions[session], out, rlen);
+          rlen = write(dc->sessions[session], out, rlen);
 #endif
+          if (rlen < 0)
+          {
+            writeLog(LOG_WARN, "DEV: writing console failed %s\n", dc->deviceid);
+          }
         }
         rlen = 0;
         break;
@@ -197,16 +200,18 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
         switch (tmp[4])
         {
         case RTTY_FILE_MSG_START_DOWNLOAD:
-          if (wc)
-          {
-            memcpy(tmp, "flo", 3);
-            rlen = wsBuildBuffer((char *) tmp, 3, out);
-            writeWebSock(wc, out, rlen);
-          }
           out[0] = MSG_TYPE_FILE;
           out[1] = 0;
           out[2] = 1;
-          out[3] = RTTY_FILE_MSG_REQUEST_ACCEPT;
+          if (wc)
+          {
+            wsSendBuffer(wc, 0x01, (unsigned char *)"flo", 3);
+            out[3] = RTTY_FILE_MSG_REQUEST_ACCEPT;
+          }
+          else
+          {
+            out[3] = RTTY_FILE_MSG_CANCELED;
+          }
           rlen = 4;
           break;
         case RTTY_FILE_MSG_INFO:
@@ -218,8 +223,7 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
             wc->file = (unsigned char *) malloc(wc->filesize);
 
             memcpy(tmp + 1, "fli:", 4);
-            rlen = wsBuildBuffer((char *) tmp + 1, len + 2, out);
-            writeWebSock(wc, out, rlen);
+            wsSendBuffer(wc, 0x01, tmp + 1, len + 2);
             out[0] = MSG_TYPE_FILE;
             out[1] = 0;
             out[2] = 1;
@@ -236,8 +240,7 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
               {
                 memcpy(wc->file, "fld:", 4);
                 rlen = EVP_EncodeBlock(wc->file + 4, wc->filehold, wc->fileptr);
-                rlen = wsBuildBuffer((char *) wc->file, rlen + 4, out);
-                writeWebSock(wc, out, rlen);
+                wsSendBuffer(wc, 0x01, wc->file, rlen + 4);
                 free(wc->file);
                 wc->file = NULL;
               }
@@ -250,8 +253,7 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
               rlen = EVP_EncodeBlock(wc->file + 4, dc->in + dc->plen + 5 - wc->fileptr, len + wc->fileptr - out[0] - 2);
               wc->fileptr = out[0];
               memcpy(wc->filehold, dc->in + dc->plen + 5 + len - wc->fileptr - 2, wc->fileptr);
-              rlen = wsBuildBuffer((char *) wc->file, rlen + 4, out);
-              writeWebSock(wc, out, rlen);
+              wsSendBuffer(wc, 0x01, wc->file, rlen + 4);
             }
           }
           out[0] = MSG_TYPE_FILE;
@@ -404,12 +406,12 @@ void disconnectDevice(DeviceContext_t *dc)
   free(dc);
 }
 
-inline void writeDevSock(DeviceContext_t *dc, const void* data, int len)
+inline ssize_t writeDevSock(DeviceContext_t *dc, const void* data, int len)
 {
 #if ENABLE_SSL
-  SSL_write(dc->ssl, data, len);
+  return SSL_write(dc->ssl, data, len);
 #else
-  write(dc->sock, data, len);
+  return write(dc->sock, data, len);
 #endif
 }
 

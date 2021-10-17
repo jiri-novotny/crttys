@@ -65,7 +65,7 @@ typedef struct
 void acceptDevice(int clientSock, SSL_CTX *sslCtx, struct hashmap *context);
 void disconnectDevice(DeviceContext_t *dc);
 void handleDeviceData(DeviceContext_t *dc, struct hashmap *context, struct hashmap **shared);
-void writeDevSock(DeviceContext_t *wc, const void* data, int len);
+ssize_t writeDevSock(DeviceContext_t *wc, const void* data, int len);
 void cleanupDevices(struct hashmap *context);
 
 #endif
