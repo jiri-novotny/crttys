@@ -12,25 +12,28 @@ web: hexgen
 	./hexgen web/terminal.html terminal.c webTerminal
 
 normal: web
-	$(CROSS_COMPILE)$(CC) -DENABLE_SSL=0 $(SRCS) -Wall -Wextra -o $(NAME) $(LDFLAGS)
+	$(CROSS_COMPILE)$(CC) -DENABLE_SSL=0 -O2 $(SRCS) -Wall -Wextra -o $(NAME) $(LDFLAGS)
 
 debug: web
 	$(CROSS_COMPILE)$(CC) -DENABLE_SSL=0 -DLOGLEVEL=5 -g $(SRCS) -Wall -Wextra -o $(NAME) $(LDFLAGS)
 
 ssl: web
-	$(CROSS_COMPILE)$(CC) -DENABLE_SSL=1 $(SRCS) -Wall -Wextra -o $(NAME) $(LDFLAGS)
+	$(CROSS_COMPILE)$(CC) -DENABLE_SSL=1 -O2 $(SRCS) -Wall -Wextra -o $(NAME) $(LDFLAGS)
 
 webssl: web
-	$(CROSS_COMPILE)$(CC) -DENABLE_WEB_SSL=1 $(SRCS) -Wall -Wextra -o $(NAME) $(LDFLAGS)
+	$(CROSS_COMPILE)$(CC) -DENABLE_WEB_SSL=1 -O2 $(SRCS) -Wall -Wextra -o $(NAME) $(LDFLAGS)
 
 fullssl: web
-	$(CROSS_COMPILE)$(CC) -DENABLE_SSL=1 -DENABLE_WEB_SSL=1 $(SRCS) -Wall -Wextra -o $(NAME) $(LDFLAGS)
+	$(CROSS_COMPILE)$(CC) -DENABLE_SSL=1 -DENABLE_WEB_SSL=1 -O2 $(SRCS) -Wall -Wextra -o $(NAME) $(LDFLAGS)
 
 debugssl: web
 	$(CROSS_COMPILE)$(CC) -DENABLE_SSL=1 -DENABLE_WEB_SSL=1 -DLOGLEVEL=5 -g $(SRCS) -Wall -Wextra -o $(NAME) $(LDFLAGS)
 
 debugtest: web
 	$(CROSS_COMPILE)$(CC) -DENABLE_SSL=0 -DLOGLEVEL=5 -DWS_TEST=1 -g $(SRCS) -Wall -Wextra -o $(NAME) $(LDFLAGS)
+
+debugssltest: web
+	$(CROSS_COMPILE)$(CC) -DENABLE_WEB_SSL=1 -DLOGLEVEL=5 -DWS_TEST=1 -g $(SRCS) -Wall -Wextra -o $(NAME) $(LDFLAGS)
 
 test: web
 	$(CROSS_COMPILE)$(CC) -DENABLE_SSL=0 -DWS_TEST=1 -O2 $(SRCS) -Wall -Wextra -o $(NAME) $(LDFLAGS)
