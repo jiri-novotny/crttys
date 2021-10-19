@@ -1,7 +1,7 @@
 #ifndef NET_H
 #define NET_H
 
-#define MAX_CLIENTS 5
+#define MAX_CLIENTS 32
 
 int setSocketFlags(int sock, int f);
 int openSocket(int port);

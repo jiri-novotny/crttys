@@ -243,6 +243,8 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
                 wsSendBuffer(wc, 0x01, wc->file, rlen + 4);
                 free(wc->file);
                 wc->file = NULL;
+                wc->filesize = 0;
+                wc->fileptr = 0;
               }
             }
             else
@@ -281,6 +283,8 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
               {
                 free(wc->file);
                 wc->file = NULL;
+                wc->filesize = 0;
+                wc->fileptr = 0;
               }
             }
             else
@@ -288,6 +292,8 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
               rlen = 0;
               free(wc->file);
               wc->file = NULL;
+              wc->filesize = 0;
+              wc->fileptr = 0;
             }
             *(unsigned short *) &out[1] = htons((unsigned short) rlen + 1);
             rlen += 4;
@@ -297,10 +303,10 @@ static int processMessage(DeviceContext_t *dc, struct hashmap **shared)
           writeLog(LOG_DEBUG, "DEV: RTTY_FILE_MSG_CANCELED\n");
           if (wc && wc->file)
           {
-            wc->filesize = 0;
-            wc->fileptr = 0;
             free(wc->file);
             wc->file = NULL;
+            wc->filesize = 0;
+            wc->fileptr = 0;
           }
           rlen = 0;
           break;

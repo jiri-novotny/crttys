@@ -149,7 +149,6 @@ static void wsSendClose(WebContext_t *wc, unsigned short reason)
 
 int processWsMessage(WebContext_t *wc, struct hashmap **shared, unsigned char type, unsigned char *input, unsigned int len)
 {
-  char *tmp;
   char out[8];
   uint32_t j;
   uint32_t k;
@@ -239,6 +238,7 @@ int processWsMessage(WebContext_t *wc, struct hashmap **shared, unsigned char ty
       free(wc->file);
       wc->file = NULL;
       wc->filesize = 0;
+      wc->fileptr = 0;
     }
   }
   else if (0 == memcmp(input, "fls:", 4) && wc->session != -1)
@@ -260,26 +260,13 @@ int processWsMessage(WebContext_t *wc, struct hashmap **shared, unsigned char ty
       }
       else
       {
-        // check size!
-        tmp = realloc(input, wc->filesize * 3);
-        if (tmp)
-        {
-          writeLog(LOG_NOTICE, "WS:  file buffer realloc\n");
-          input = (unsigned char *) tmp;
-          wc->rblen = wc->filesize * 3;
-          k = strlen(wc->filename);
-          *(unsigned short *) &out[1] = htons((unsigned short) 5 + k);
-          out[3] = RTTY_FILE_MSG_INFO;
-          *(unsigned int *) &out[4] = htonl((uint32_t) wc->filesize);
-          wc->fileptr = 0;
-          writeTargetSock(wc, out, 8);
-          writeTargetSock(wc, wc->filename, k);
-        }
-        else
-        {
-          writeLog(LOG_WARN, "WS:  file buffer cancel mem\n");
-          writeTargetSock(wc, out, 4);
-        }
+        k = strlen(wc->filename);
+        *(unsigned short *) &out[1] = htons((unsigned short) 5 + k);
+        out[3] = RTTY_FILE_MSG_INFO;
+        *(unsigned int *) &out[4] = htonl((uint32_t) wc->filesize);
+        wc->fileptr = 0;
+        writeTargetSock(wc, out, 8);
+        writeTargetSock(wc, wc->filename, k);
       }
     }
     else
@@ -307,9 +294,10 @@ int processWsMessage(WebContext_t *wc, struct hashmap **shared, unsigned char ty
       wc->fileptr += k;
       if (wc->filesize <= 0)
       {
-        /* FIXME */
         free(wc->file);
         wc->file = NULL;
+        wc->filesize = 0;
+        wc->fileptr = 0;
       }
     }
     else

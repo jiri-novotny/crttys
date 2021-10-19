@@ -311,6 +311,7 @@ void handleWebData(WebContext_t *wc, struct hashmap **shared)
             }
             if (hashmap_get(shared[2], &hashkey) != NULL)
             {
+              memset(sd.auth, 0, 512);
               k = 1;
             }
             else
